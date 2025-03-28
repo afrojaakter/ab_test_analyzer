@@ -1173,8 +1173,67 @@ st.markdown("---")
 st.header("Segment Analysis")
 st.markdown("""
 Analyze how different user segments respond to your A/B test variants.
-Upload segment data to discover which segments show the strongest response.
+Upload segment data to discover which segments show the strongest response and make targeted decisions.
 """)
+
+# Add detailed guidance on segment data format
+with st.expander("What is Segment Analysis?"):
+    st.markdown("""
+    **Segment analysis** helps you understand which specific user groups respond better to your test variants. 
+    For example, your variant might work better for mobile users but worse for desktop users.
+    
+    By analyzing segments, you can:
+    - Discover where your variant is most effective
+    - Implement targeted rollouts to specific user groups
+    - Gain deeper insights into user behavior
+    - Avoid the "average effect" trap that hides segment-specific impacts
+    """)
+
+with st.expander("How to Prepare Your Segment Data"):
+    st.markdown("""
+    ### Required CSV Format
+    
+    Your data must contain these exact column names:
+    
+    | Column | Description | Example |
+    | ------ | ----------- | ------- |
+    | `segment` | Segment name/identifier | "Mobile Users", "New Users" |
+    | `group` | Test group (lowercase) | "control" or "variant" |
+    | `visitors` | Number of visitors | 5000, 3200 |
+    | `conversions` | Number of conversions | 250, 160 |
+    
+    ### Example Data
+    
+    ```
+    segment,group,visitors,conversions
+    Mobile Users,control,5000,250
+    Mobile Users,variant,5100,320
+    Desktop Users,control,3000,210
+    Desktop Users,variant,2950,200
+    New Users,control,4000,120
+    New Users,variant,4100,150
+    ```
+    
+    ### Important Tips
+    
+    1. Each segment needs both control and variant data
+    2. The `group` values must be exactly "control" or "variant" (lowercase)
+    3. All values must be valid numbers (no text in number fields)
+    4. Include multiple segments for better comparative analysis
+    """)
+
+# Show sample data button
+if st.button("Load Sample Segment Data"):
+    import pandas as pd
+    sample_data = pd.read_csv("sample_segment_data.csv")
+    st.dataframe(sample_data)
+    st.download_button(
+        label="Download Sample CSV",
+        data=open("sample_segment_data.csv", "r").read(),
+        file_name="sample_segment_data.csv",
+        mime="text/csv"
+    )
+    st.info("You can download this sample data and modify it with your own values, then upload it below.")
 
 # File uploader for segment data
 uploaded_segment_file = st.file_uploader("Upload Segment Data CSV", type="csv", key="segment_data")
@@ -1193,25 +1252,14 @@ if uploaded_segment_file is not None:
         with st.expander("View Raw Segment Data"):
             st.dataframe(segment_data)
         
-        # Show expected format example if user wants to see it
-        with st.expander("Expected CSV Format"):
+        # Link back to format explanation
+        with st.expander("Data Format Reference"):
+            st.info("See 'How to Prepare Your Segment Data' section above for detailed format instructions.")
             st.markdown("""
-            Your CSV should have these columns:
-            - `segment`: The name or ID of the segment (e.g., 'Mobile Users', 'Desktop Users')
-            - `group`: Either 'control' or 'variant'
-            - `visitors`: Number of visitors in this segment and group
-            - `conversions`: Number of conversions in this segment and group
-            
-            Example:
-            ```
-            segment,group,visitors,conversions
-            Mobile Users,control,5000,250
-            Mobile Users,variant,5100,280
-            Desktop Users,control,3000,210
-            Desktop Users,variant,2950,200
-            New Users,control,4000,120
-            New Users,variant,4100,150
-            ```
+            **Quick Reminder**:
+            - Every segment needs both a control and variant row
+            - Group values must be exactly "control" or "variant" (lowercase)
+            - All numeric values must be valid numbers
             """)
         
         # Analyze the segments
@@ -1279,11 +1327,20 @@ if uploaded_segment_file is not None:
             st.warning("No valid segment pairs found in the data. Make sure each segment has both control and variant groups.")
     else:
         st.error("""
-        Could not parse the segment data. Make sure your CSV has the correct format with these columns:
-        - segment: The name or ID of the segment
-        - group: Either 'control' or 'variant'
-        - visitors: Number of visitors 
-        - conversions: Number of conversions
+        **Could not parse the segment data.** Common issues include:
+        
+        1. **Missing columns**: Your file must have exactly these column names (case-sensitive):
+           - `segment`: The name or ID of the segment 
+           - `group`: Must be exactly "control" or "variant" (lowercase)
+           - `visitors`: Number of visitors (positive integers only)
+           - `conversions`: Number of conversions (positive integers only)
+        
+        2. **Data format problems**:
+           - Group values must be exactly "control" or "variant" (lowercase)
+           - Number fields must contain only valid numbers
+           - Each segment needs both control and variant data
+           
+        Try using the "Load Sample Segment Data" button above to download a correctly formatted example.
         """)
 
 st.header("Advanced Visualizations")
