@@ -1,6 +1,9 @@
 import numpy as np
 import scipy.stats as stats
 import math
+import pandas as pd
+import io
+import base64
 
 def calculate_significance(control_conversions, control_visitors, 
                           variant_conversions, variant_visitors, 
@@ -124,3 +127,166 @@ def calculate_sample_size(baseline_rate, mde, confidence=0.95, power=0.8):
     
     # Return rounded up sample size
     return math.ceil(n)
+    
+def chi_square_test(control_conversions, control_visitors, variant_conversions, variant_visitors, alpha=0.05):
+    """
+    Perform a chi-square test for independence to determine if there is a significant difference 
+    between the expected frequencies and the observed frequencies in categories (control vs variant).
+    
+    Parameters:
+    -----------
+    control_conversions: int
+        Number of conversions in the control group
+    control_visitors: int
+        Number of visitors in the control group
+    variant_conversions: int
+        Number of conversions in the variant group
+    variant_visitors: int
+        Number of visitors in the variant group
+    alpha: float
+        Significance level (default: 0.05)
+        
+    Returns:
+    --------
+    tuple: (p_value, is_significant, chi2_statistic)
+    """
+    # Create contingency table
+    # [conversions, non-conversions]
+    control_non_conversions = control_visitors - control_conversions
+    variant_non_conversions = variant_visitors - variant_conversions
+    
+    contingency_table = [
+        [control_conversions, control_non_conversions],
+        [variant_conversions, variant_non_conversions]
+    ]
+    
+    # Handle zero values
+    if control_visitors == 0 or variant_visitors == 0:
+        return 1.0, False, 0
+    
+    # Perform chi-square test
+    chi2_stat, p_value, dof, expected = stats.chi2_contingency(contingency_table)
+    
+    # Determine if result is significant
+    is_significant = p_value < alpha
+    
+    return p_value, is_significant, chi2_stat
+
+def t_test_for_means(control_mean, control_std, control_size, 
+                     variant_mean, variant_std, variant_size, alpha=0.05):
+    """
+    Perform a two-sample t-test for means of continuous metrics.
+    
+    Parameters:
+    -----------
+    control_mean: float
+        Mean value of the control group
+    control_std: float
+        Standard deviation of the control group
+    control_size: int
+        Sample size of the control group
+    variant_mean: float
+        Mean value of the variant group
+    variant_std: float
+        Standard deviation of the variant group
+    variant_size: int
+        Sample size of the variant group
+    alpha: float
+        Significance level (default: 0.05)
+        
+    Returns:
+    --------
+    tuple: (p_value, is_significant, t_statistic)
+    """
+    # Calculate t-statistic and p-value
+    # Welch's t-test (does not assume equal variances)
+    if control_size < 2 or variant_size < 2:
+        return 1.0, False, 0
+    
+    # Calculate degrees of freedom
+    dof = ((control_std**2 / control_size + variant_std**2 / variant_size)**2) / \
+          ((control_std**2 / control_size)**2 / (control_size - 1) + 
+           (variant_std**2 / variant_size)**2 / (variant_size - 1))
+    
+    # Calculate t-statistic
+    t_stat = (control_mean - variant_mean) / \
+             math.sqrt(control_std**2 / control_size + variant_std**2 / variant_size)
+    
+    # Calculate p-value (two-tailed)
+    p_value = 2 * (1 - stats.t.cdf(abs(t_stat), dof))
+    
+    # Determine if result is significant
+    is_significant = p_value < alpha
+    
+    return p_value, is_significant, t_stat
+
+def generate_download_link(df, filename, text):
+    """
+    Generate a download link for a dataframe.
+    
+    Parameters:
+    -----------
+    df: pandas.DataFrame
+        DataFrame to download
+    filename: str
+        Name of the file to download
+    text: str
+        Text to display on download link
+        
+    Returns:
+    --------
+    str: HTML link for downloading the data
+    """
+    csv = df.to_csv(index=False)
+    b64 = base64.b64encode(csv.encode()).decode()
+    href = f'<a href="data:file/csv;base64,{b64}" download="{filename}">{text}</a>'
+    return href
+
+def parse_uploaded_csv(uploaded_file):
+    """
+    Parse an uploaded CSV file.
+    
+    Parameters:
+    -----------
+    uploaded_file: BytesIO
+        Uploaded file object from Streamlit
+        
+    Returns:
+    --------
+    dict: Dictionary with extracted values or None if parsing failed
+    """
+    try:
+        df = pd.read_csv(uploaded_file)
+        
+        # Check for valid columns
+        required_columns = ['control_visitors', 'control_conversions', 
+                           'variant_visitors', 'variant_conversions']
+        
+        if all(col in df.columns for col in required_columns):
+            # Get the latest data (last row)
+            latest = df.iloc[-1]
+            
+            return {
+                'control_visitors': int(latest['control_visitors']),
+                'control_conversions': int(latest['control_conversions']),
+                'variant_visitors': int(latest['variant_visitors']),
+                'variant_conversions': int(latest['variant_conversions'])
+            }
+        
+        # Alternative format (for time series data)
+        if 'date' in df.columns and 'group' in df.columns and 'visitors' in df.columns and 'conversions' in df.columns:
+            control_data = df[df['group'] == 'control']
+            variant_data = df[df['group'] == 'variant']
+            
+            if not control_data.empty and not variant_data.empty:
+                return {
+                    'control_visitors': int(control_data['visitors'].sum()),
+                    'control_conversions': int(control_data['conversions'].sum()),
+                    'variant_visitors': int(variant_data['visitors'].sum()),
+                    'variant_conversions': int(variant_data['conversions'].sum())
+                }
+        
+        return None
+    except Exception as e:
+        print(f"Error parsing CSV: {e}")
+        return None
