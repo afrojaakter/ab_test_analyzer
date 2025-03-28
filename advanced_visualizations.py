@@ -170,8 +170,7 @@ def generate_time_series_simulation(control_rate, variant_rate, visitors_per_day
             tickformat='.2%'
         ),
         yaxis2=dict(
-            title='p-value',
-            titlefont=dict(color='orange'),
+            title=dict(text='p-value', font=dict(color='orange')),
             tickfont=dict(color='orange'),
             anchor='x',
             overlaying='y',

@@ -1163,9 +1163,11 @@ if st.button("Calculate Significance"):
 
 # Advanced visualizations section
 from advanced_visualizations import (
-    generate_time_series_simulation, create_distribution_comparison,
-    create_distribution_comparison_categorical, create_power_analysis_curve
+    generate_time_series_simulation, create_distribution_comparison, 
+    create_distribution_comparison_categorical, create_power_analysis_curve,
+    calculate_sample_size_for_proportion
 )
+from scipy import stats
 
 st.markdown("---")
 st.header("Advanced Visualizations")
