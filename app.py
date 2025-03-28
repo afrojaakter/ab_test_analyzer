@@ -1161,6 +1161,283 @@ if st.button("Calculate Significance"):
     - **Multiple Testing:** If you're running multiple tests, adjust your significance threshold
     """)
 
+# Advanced visualizations section
+from advanced_visualizations import (
+    generate_time_series_simulation, create_distribution_comparison,
+    create_distribution_comparison_categorical, create_power_analysis_curve
+)
+
+st.markdown("---")
+st.header("Advanced Visualizations")
+st.markdown("""
+These visualizations help you better understand your test results and plan future experiments.
+Choose from the options below to explore different aspects of your A/B test.
+""")
+
+# Create tabs for different visualization types
+viz_tabs = st.tabs(["Time Series View", "Distribution Comparison", "Power Analysis"])
+
+with viz_tabs[0]:
+    st.subheader("Time Series View")
+    st.markdown("""
+    This simulation shows how statistical significance typically evolves over time as more data is collected.
+    It can help you understand how long to run your test before reaching a conclusion.
+    """)
+    
+    # Input parameters for time series simulation
+    ts_cols = st.columns(3)
+    with ts_cols[0]:
+        ts_control_rate = st.number_input("Control Conversion Rate", 
+                                         min_value=0.001, max_value=1.0, value=0.1, step=0.001, 
+                                         format="%.3f", key="ts_control_rate")
+    with ts_cols[1]:
+        ts_variant_rate = st.number_input("Variant Conversion Rate", 
+                                         min_value=0.001, max_value=1.0, value=0.12, step=0.001, 
+                                         format="%.3f", key="ts_variant_rate")
+    with ts_cols[2]:
+        ts_visitors_per_day = st.number_input("Daily Visitors Per Variant", 
+                                             min_value=10, max_value=10000, value=500, step=10, 
+                                             key="ts_visitors")
+    
+    ts_cols2 = st.columns(2)
+    with ts_cols2[0]:
+        ts_days = st.slider("Test Duration (Days)", 
+                          min_value=7, max_value=60, value=21, step=1, 
+                          key="ts_days")
+    with ts_cols2[1]:
+        ts_confidence = st.slider("Confidence Level", 
+                                min_value=0.8, max_value=0.99, value=0.95, step=0.01, 
+                                format="%.0f%%", key="ts_confidence")
+    
+    if st.button("Generate Time Series Simulation", key="btn_ts_sim"):
+        # Run the simulation
+        ts_results = generate_time_series_simulation(
+            control_rate=ts_control_rate,
+            variant_rate=ts_variant_rate,
+            visitors_per_day=ts_visitors_per_day,
+            days=ts_days,
+            confidence_level=ts_confidence
+        )
+        
+        # Display the plot
+        st.plotly_chart(ts_results['fig'], use_container_width=True)
+        
+        # Show when significance was reached (if it was)
+        if ts_results['reached_significance']:
+            # Get the first date where significance was reached
+            first_sig_day = ts_results['df'][ts_results['df']['significant']].iloc[0]
+            st.success(f"Statistical significance was reached on day {first_sig_day.name + 1} with a p-value of {first_sig_day['p_value']:.4f}")
+            
+            # Calculate visitors needed
+            visitors_needed = first_sig_day['control_visitors'] + first_sig_day['variant_visitors']
+            st.info(f"Total visitors required: {visitors_needed:,}")
+        else:
+            st.warning("Statistical significance was not reached within the simulated time period. Consider running a longer test or expecting a larger effect.")
+
+with viz_tabs[1]:
+    st.subheader("Distribution Comparison")
+    st.markdown("""
+    This visualization shows the distribution of values for the control and variant groups, 
+    helping you understand the overlap between them and the effect size.
+    """)
+    
+    # Choose distribution type
+    dist_type = st.radio(
+        "Select Distribution Type",
+        ["Conversion Rate (Binomial)", "Continuous Metric (Normal)"],
+        horizontal=True,
+        key="dist_type"
+    )
+    
+    if dist_type == "Continuous Metric (Normal)":
+        # Input for continuous metric distributions
+        dist_cols = st.columns(2)
+        
+        with dist_cols[0]:
+            st.subheader("Control Group")
+            dist_control_mean = st.number_input("Control Mean", 
+                                              value=100.0, step=1.0, key="dist_control_mean")
+            dist_control_std = st.number_input("Control Standard Deviation", 
+                                             min_value=0.1, value=20.0, step=1.0, key="dist_control_std")
+        
+        with dist_cols[1]:
+            st.subheader("Variant Group")
+            dist_variant_mean = st.number_input("Variant Mean", 
+                                              value=110.0, step=1.0, key="dist_variant_mean")
+            dist_variant_std = st.number_input("Variant Standard Deviation", 
+                                             min_value=0.1, value=20.0, step=1.0, key="dist_variant_std")
+        
+        if st.button("Generate Distribution Comparison", key="btn_dist_cont"):
+            # Create the plot
+            dist_fig = create_distribution_comparison(
+                control_mean=dist_control_mean,
+                control_std=dist_control_std,
+                variant_mean=dist_variant_mean,
+                variant_std=dist_variant_std
+            )
+            
+            # Display the plot
+            st.plotly_chart(dist_fig, use_container_width=True)
+            
+            # Calculate t-test statistics
+            t_stat, p_value, df = stats.ttest_ind_from_stats(
+                dist_control_mean, dist_control_std, 1000,  # Assuming n=1000 for significance calculation
+                dist_variant_mean, dist_variant_std, 1000,
+                equal_var=False  # Using Welch's t-test
+            )
+            
+            # Display statistics
+            st.markdown(f"**t-statistic:** {t_stat:.4f}")
+            st.markdown(f"**p-value:** {p_value:.4f}")
+            
+            # Significance statement
+            if p_value < 0.05:
+                st.success("The difference between means is statistically significant (p < 0.05).")
+            else:
+                st.warning("The difference between means is not statistically significant (p ≥ 0.05).")
+            
+            # Effect size
+            effect_size = abs(dist_control_mean - dist_variant_mean) / ((dist_control_std + dist_variant_std) / 2)
+            
+            if effect_size < 0.2:
+                effect_interpretation = "small"
+            elif effect_size < 0.5:
+                effect_interpretation = "medium"
+            elif effect_size < 0.8:
+                effect_interpretation = "large"
+            else:
+                effect_interpretation = "very large"
+            
+            st.info(f"Effect size (Cohen's d): {effect_size:.2f} ({effect_interpretation})")
+    
+    else:  # Conversion Rate distribution
+        # Input for conversion rate distributions
+        cr_cols = st.columns(2)
+        
+        with cr_cols[0]:
+            st.subheader("Control Group")
+            cr_control_rate = st.number_input("Control Conversion Rate", 
+                                            min_value=0.001, max_value=1.0, value=0.1, 
+                                            step=0.001, format="%.3f", key="cr_control_rate")
+            cr_control_size = st.number_input("Control Sample Size", 
+                                            min_value=100, value=1000, step=100, key="cr_control_size")
+        
+        with cr_cols[1]:
+            st.subheader("Variant Group")
+            cr_variant_rate = st.number_input("Variant Conversion Rate", 
+                                            min_value=0.001, max_value=1.0, value=0.12, 
+                                            step=0.001, format="%.3f", key="cr_variant_rate")
+            cr_variant_size = st.number_input("Variant Sample Size", 
+                                            min_value=100, value=1000, step=100, key="cr_variant_size")
+        
+        if st.button("Generate Distribution Comparison", key="btn_dist_cr"):
+            # Create the plot
+            cr_fig = create_distribution_comparison_categorical(
+                control_rate=cr_control_rate,
+                variant_rate=cr_variant_rate,
+                control_size=cr_control_size,
+                variant_size=cr_variant_size
+            )
+            
+            # Display the plot
+            st.plotly_chart(cr_fig, use_container_width=True)
+            
+            # Calculate Z-test statistics
+            # Pooled proportion under null hypothesis
+            p_pooled = (cr_control_rate * cr_control_size + cr_variant_rate * cr_variant_size) / (cr_control_size + cr_variant_size)
+            
+            # Standard error
+            se = math.sqrt(p_pooled * (1 - p_pooled) * (1/cr_control_size + 1/cr_variant_size))
+            
+            # Z-score
+            z_score = (cr_variant_rate - cr_control_rate) / se if se > 0 else 0
+            
+            # P-value (two-tailed)
+            p_value = 2 * (1 - stats.norm.cdf(abs(z_score)))
+            
+            # Display statistics
+            st.markdown(f"**Z-score:** {z_score:.4f}")
+            st.markdown(f"**p-value:** {p_value:.4f}")
+            
+            # Significance statement
+            if p_value < 0.05:
+                st.success("The difference between conversion rates is statistically significant (p < 0.05).")
+            else:
+                st.warning("The difference between conversion rates is not statistically significant (p ≥ 0.05).")
+            
+            # Relative improvement
+            relative_diff = (cr_variant_rate - cr_control_rate) / cr_control_rate
+            st.info(f"Relative improvement: {relative_diff:.2%}")
+
+with viz_tabs[2]:
+    st.subheader("Power Analysis")
+    st.markdown("""
+    Power analysis helps you determine the sample size needed to detect a specific effect, or
+    understand the minimum effect you can detect with your current sample size.
+    """)
+    
+    # Input parameters for power analysis
+    power_cols = st.columns(3)
+    with power_cols[0]:
+        power_baseline = st.number_input("Baseline Conversion Rate", 
+                                        min_value=0.001, max_value=1.0, value=0.1, 
+                                        step=0.001, format="%.3f", key="power_baseline")
+    with power_cols[1]:
+        power_confidence = st.slider("Confidence Level", 
+                                   min_value=0.8, max_value=0.99, value=0.95, step=0.01, 
+                                   format="%.0f%%", key="power_confidence")
+    with power_cols[2]:
+        power_level = st.slider("Statistical Power", 
+                              min_value=0.7, max_value=0.99, value=0.8, step=0.01, 
+                              format="%.0f%%", key="power_level")
+    
+    if st.button("Generate Power Analysis", key="btn_power"):
+        # Create power analysis curves
+        power_results = create_power_analysis_curve(
+            baseline_rate=power_baseline,
+            confidence=power_confidence,
+            power=power_level
+        )
+        
+        # Display sample size curve
+        st.subheader("Sample Size Requirements")
+        st.markdown("""
+        This chart shows the required sample size per variant to detect different minimum detectable effects (MDEs).
+        As the MDE gets smaller, the required sample size increases exponentially.
+        """)
+        st.plotly_chart(power_results['sample_size_curve'], use_container_width=True)
+        
+        # Display power curves
+        st.subheader("Power Curves")
+        st.markdown("""
+        These curves show the statistical power for different effect sizes and sample sizes.
+        The horizontal line represents the target power level you specified.
+        """)
+        st.plotly_chart(power_results['power_curves'], use_container_width=True)
+        
+        # Example calculations
+        st.subheader("Sample Size Estimates")
+        
+        mde_examples = [0.05, 0.10, 0.15, 0.20]  # 5%, 10%, 15%, 20% relative improvements
+        
+        # Create table
+        mde_data = []
+        for mde in mde_examples:
+            sample_size = calculate_sample_size_for_proportion(power_baseline, mde, power_confidence, power_level)
+            absolute_effect = power_baseline * mde
+            new_rate = power_baseline * (1 + mde)
+            
+            mde_data.append({
+                "MDE (Relative)": f"{mde:.0%}",
+                "Effect (Absolute)": f"{absolute_effect:.3f}",
+                "New Rate": f"{new_rate:.3f}",
+                "Sample Size (per variant)": f"{sample_size:,}",
+                "Total Sample": f"{sample_size*2:,}"
+            })
+        
+        mde_df = pd.DataFrame(mde_data)
+        st.table(mde_df)
+
 # Footer with additional info
 st.markdown("---")
 
