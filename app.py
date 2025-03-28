@@ -1196,9 +1196,9 @@ with duration_cols[0]:
         min_value=0.01, 
         max_value=1.0, 
         value=0.1, 
-        step=0.01, 
+        step=0.05, 
         format="%.2f",
-        help="The minimum relative improvement you want to detect (e.g., 0.1 = 10% improvement)",
+        help="The minimum relative improvement you want to detect (e.g., 0.1 = 10% improvement). Common values: 0.05, 0.10, 0.15, 0.20",
         key="duration_mde"
     )
     
