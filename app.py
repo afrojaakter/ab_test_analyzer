@@ -1170,6 +1170,165 @@ from advanced_visualizations import (
 from scipy import stats
 
 st.markdown("---")
+st.header("Test Duration Calculator")
+st.markdown("""
+Estimate how long to run your A/B test based on your expected traffic and desired minimum detectable effect (MDE).
+This calculator helps you plan realistic timelines for your experiments.
+""")
+
+# Create columns for input
+duration_cols = st.columns(2)
+
+with duration_cols[0]:
+    st.subheader("Test Parameters")
+    baseline_rate = st.number_input(
+        "Baseline Conversion Rate", 
+        min_value=0.001, 
+        max_value=1.0, 
+        value=0.1, 
+        step=0.001, 
+        format="%.3f",
+        key="duration_baseline_rate"
+    )
+    
+    relative_mde = st.number_input(
+        "Minimum Detectable Effect (relative)", 
+        min_value=0.01, 
+        max_value=1.0, 
+        value=0.1, 
+        step=0.01, 
+        format="%.2f",
+        help="The minimum relative improvement you want to detect (e.g., 0.1 = 10% improvement)",
+        key="duration_mde"
+    )
+    
+    confidence_level = st.slider(
+        "Confidence Level", 
+        min_value=0.8, 
+        max_value=0.99, 
+        value=0.95, 
+        step=0.01, 
+        format="%.0f%%",
+        key="duration_confidence"
+    )
+    
+    power = st.slider(
+        "Statistical Power", 
+        min_value=0.7, 
+        max_value=0.99, 
+        value=0.8, 
+        step=0.01, 
+        format="%.0f%%",
+        key="duration_power"
+    )
+
+with duration_cols[1]:
+    st.subheader("Traffic Information")
+    daily_visitors = st.number_input(
+        "Total Daily Visitors", 
+        min_value=10, 
+        max_value=1000000, 
+        value=1000, 
+        step=100,
+        help="Total number of visitors to your site or app per day",
+        key="duration_visitors"
+    )
+    
+    traffic_allocation = st.slider(
+        "Traffic Allocation to Test (%)", 
+        min_value=1, 
+        max_value=100, 
+        value=50, 
+        step=1,
+        help="Percentage of your traffic that will be included in the test",
+        key="duration_allocation"
+    )
+    
+    variant_split = st.slider(
+        "Control/Variant Split", 
+        min_value=50, 
+        max_value=95, 
+        value=50, 
+        step=5,
+        help="How traffic is divided between control and variant (50 = equal split)",
+        key="duration_split"
+    )
+
+# Calculate when button is clicked
+if st.button("Calculate Test Duration", key="btn_calc_duration"):
+    # Calculate required sample size
+    from utils import calculate_sample_size
+    
+    sample_size_per_variant = calculate_sample_size(
+        baseline_rate=baseline_rate,
+        mde=relative_mde,
+        confidence=confidence_level,
+        power=power
+    )
+    
+    # Calculate traffic per day for each variant
+    total_test_traffic = daily_visitors * (traffic_allocation / 100)
+    control_pct = variant_split / 100
+    variant_pct = (100 - variant_split) / 100
+    
+    if variant_split == 50:  # Equal split
+        control_traffic = total_test_traffic / 2
+        variant_traffic = total_test_traffic / 2
+    else:
+        control_traffic = total_test_traffic * control_pct
+        variant_traffic = total_test_traffic * variant_pct
+    
+    # The limiting group will be the one with less traffic
+    limiting_traffic = min(control_traffic, variant_traffic)
+    
+    # Calculate days needed
+    days_needed = math.ceil(sample_size_per_variant / limiting_traffic)
+    
+    # Display results
+    st.subheader("Test Duration Estimate")
+    
+    # Create columns for results
+    result_cols = st.columns(3)
+    with result_cols[0]:
+        st.metric("Required Sample Size", f"{sample_size_per_variant:,} per variant")
+    with result_cols[1]:
+        st.metric("Total Sample Size", f"{sample_size_per_variant * 2:,}")
+    with result_cols[2]:
+        st.metric("Estimated Test Duration", f"{days_needed:,} days")
+    
+    # Add additional context
+    st.info(f"""
+    Based on your parameters:
+    - Daily visitors to control: {control_traffic:.0f} ({control_pct:.0%} of test traffic)
+    - Daily visitors to variant: {variant_traffic:.0f} ({variant_pct:.0%} of test traffic)
+    - You'll need at least {days_needed:,} days to reach statistical significance
+    """)
+    
+    # Provide recommendations
+    if days_needed > 30:
+        st.warning(f"""
+        **A {days_needed}-day test is quite long.** Consider:
+        - Increasing your minimum detectable effect (currently {relative_mde:.0%})
+        - Increasing traffic allocation to the test (currently {traffic_allocation}%)
+        - Reducing the confidence level (currently {confidence_level:.0%}) or power (currently {power:.0%})
+        - Testing on a segment with a higher baseline conversion rate
+        """)
+    elif days_needed < 7:
+        st.success(f"""
+        **A {days_needed}-day test is relatively short.** Consider:
+        - Running the test for at least 1-2 weeks anyway to account for day-of-week effects
+        - Decreasing your minimum detectable effect to detect smaller changes
+        - Increasing confidence level and power for more reliable results
+        """)
+    else:
+        st.success(f"""
+        **A {days_needed}-day test is reasonable.** Best practices:
+        - Run the test for complete weeks to account for day-of-week effects
+        - Monitor key metrics but avoid peeking and stopping early
+        - Document your test plan and success criteria before starting
+        """)
+
+st.markdown("---")
 st.header("Segment Analysis")
 st.markdown("""
 Analyze how different user segments respond to your A/B test variants.
