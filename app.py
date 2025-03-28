@@ -550,6 +550,11 @@ if st.button("Calculate Significance"):
                 # Run pairwise comparisons
                 pairwise_df = pairwise_proportion_test(conversions_list, visitors_list, labels)
                 
+                # Add visual indicators for significance
+                pairwise_df['Significant'] = pairwise_df['Significant'].apply(
+                    lambda x: '✓' if x else '✗'
+                )
+                
                 # Display results
                 st.markdown("## Results Analysis")
                 
@@ -703,6 +708,11 @@ if st.button("Calculate Significance"):
             
             # Run Tukey's HSD test for pairwise comparisons
             results_df, all_pairs_df = pairwise_tukey_hsd(anova_data, labels)
+            
+            # Add visual indicators for significance
+            all_pairs_df['Significant'] = all_pairs_df['Significant'].apply(
+                lambda x: '✓' if x else '✗'
+            )
             
             # Display results
             st.markdown("## Results Analysis")
