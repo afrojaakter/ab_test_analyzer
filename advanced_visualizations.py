@@ -194,11 +194,40 @@ def generate_time_series_simulation(control_rate, variant_rate, visitors_per_day
             significance_index = i
             break
     
+    # Instead of adding a vline for significance, add a custom annotation and shape
     if significance_index is not None:
-        # Convert the date to string format to avoid timestamp issues
-        significance_date_str = df.iloc[significance_index]['date'].strftime('%Y-%m-%d')
-        fig.add_vline(x=significance_date_str, line_dash="dash", line_color="green",
-                      annotation_text="Significance Achieved", annotation_position="top right")
+        # Add a shape for the significance line - using a line shape instead of vline
+        significance_day = significance_index + 1  # +1 for day number (1-indexed)
+        
+        # Add a band to highlight the significant day
+        fig.add_shape(
+            type="rect",
+            x0=significance_day - 0.5,
+            x1=significance_day + 0.5,
+            y0=0,
+            y1=1,
+            xref="x",
+            yref="paper",
+            fillcolor="rgba(0, 255, 0, 0.2)",
+            line=dict(width=0),
+        )
+        
+        # Add annotation for the significance
+        fig.add_annotation(
+            x=significance_day,
+            y=1,
+            xref="x",
+            yref="paper",
+            text="Significance Achieved",
+            showarrow=True,
+            arrowhead=1,
+            ax=0,
+            ay=-40,
+            font=dict(color="green", size=12),
+            bgcolor="white",
+            bordercolor="green",
+            borderwidth=1,
+        )
     
     return {'df': df, 'fig': fig, 'reached_significance': significance_index is not None}
 
