@@ -352,21 +352,24 @@ def pairwise_tukey_hsd(data, labels=None, alpha=0.05):
     # Perform Tukey's HSD test
     tukey_results = pairwise_tukeyhsd(all_values, group_labels, alpha=alpha)
     
-    # Create dataframe with all pairs results using the summary output
-    # Convert the Tukey HSD results summary to a DataFrame for easier processing
-    summary_df = pd.read_html(str(tukey_results.summary()))[0]
+    # Create dataframe with all pairs results directly from the Tukey results object
+    # Get all unique pairs from the groups
+    from itertools import combinations
+    unique_groups = list(tukey_results.groupsunique)
+    group_pairs = list(combinations(unique_groups, 2))
     
-    # Create our own pairs dataframe
+    # Create pairs dataframe
     pairs = []
-    for _, row in summary_df.iterrows():
+    # The results are stored in the same order as combinations of groups
+    for i, (group1, group2) in enumerate(group_pairs):
         pairs.append({
-            'Group 1': row['group1'],
-            'Group 2': row['group2'],
-            'Mean Diff': row['meandiff'],
-            'P-Value': row['p-adj'],
-            'Significant': row['reject'],
-            'Lower CI': row['lower'],
-            'Upper CI': row['upper']
+            'Group 1': group1,
+            'Group 2': group2,
+            'Mean Diff': tukey_results.meandiffs[i],
+            'P-Value': tukey_results.pvalues[i],
+            'Significant': tukey_results.reject[i],
+            'Lower CI': tukey_results.confint[i, 0],
+            'Upper CI': tukey_results.confint[i, 1]
         })
     
     all_pairs_df = pd.DataFrame(pairs)

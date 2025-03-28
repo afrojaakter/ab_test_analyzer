@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.11"
 dependencies = [
+    "lxml>=5.3.1",
     "numpy>=2.2.4",
     "openai>=1.69.0",
     "pandas>=2.2.3",
@@ -11,4 +12,5 @@ dependencies = [
     "scipy>=1.15.2",
     "statsmodels>=0.14.4",
     "streamlit>=1.44.0",
+    "twilio>=9.5.1",
 ]
