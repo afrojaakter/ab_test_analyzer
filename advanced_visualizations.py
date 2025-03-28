@@ -188,17 +188,19 @@ def generate_time_series_simulation(control_rate, variant_rate, visitors_per_day
     )
     
     # Add markers for when significance is achieved
-    significance_date = None
+    significance_index = None
     for i, row in df.iterrows():
         if row['significant']:
-            significance_date = row['date']
+            significance_index = i
             break
     
-    if significance_date is not None:
-        fig.add_vline(x=significance_date, line_dash="dash", line_color="green",
+    if significance_index is not None:
+        # Convert the date to string format to avoid timestamp issues
+        significance_date_str = df.iloc[significance_index]['date'].strftime('%Y-%m-%d')
+        fig.add_vline(x=significance_date_str, line_dash="dash", line_color="green",
                       annotation_text="Significance Achieved", annotation_position="top right")
     
-    return {'df': df, 'fig': fig, 'reached_significance': significance_date is not None}
+    return {'df': df, 'fig': fig, 'reached_significance': significance_index is not None}
 
 def create_distribution_comparison(control_mean, control_std, variant_mean, variant_std, 
                                    sample_points=1000, random_seed=42):
