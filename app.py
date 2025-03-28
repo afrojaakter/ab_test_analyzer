@@ -4,7 +4,8 @@ import pandas as pd
 import math
 from utils import (
     calculate_significance, calculate_confidence_interval, calculate_sample_size,
-    chi_square_test, t_test_for_means, generate_download_link, parse_uploaded_csv
+    chi_square_test, t_test_for_means, generate_download_link, parse_uploaded_csv,
+    multi_proportion_test, pairwise_proportion_test, multi_comparison_anova, pairwise_tukey_hsd
 )
 import plotly.graph_objects as go
 import io
