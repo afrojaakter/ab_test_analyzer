@@ -32,9 +32,8 @@ def generate_time_series_simulation(control_rate, variant_rate, visitors_per_day
     np.random.seed(random_seed)
     
     # Initialize data structures
-    dates = pd.date_range(start='2023-01-01', periods=days)
     cumulative_data = {
-        'date': dates,
+        'day': list(range(1, days + 1)),
         'control_visitors': [],
         'control_conversions': [],
         'control_rate': [],
@@ -57,7 +56,9 @@ def generate_time_series_simulation(control_rate, variant_rate, visitors_per_day
     z_critical = stats.norm.ppf(1 - alpha/2)
     
     # Calculate daily results and cumulative metrics
-    for day in range(days):
+    for day_idx in range(days):
+        day_number = day_idx + 1  # Use 1-indexed day numbers
+        
         # Generate daily conversions based on the true rates
         control_daily_visitors = visitors_per_day
         variant_daily_visitors = visitors_per_day
@@ -127,7 +128,7 @@ def generate_time_series_simulation(control_rate, variant_rate, visitors_per_day
     
     # Add conversion rates
     fig.add_trace(go.Scatter(
-        x=df['date'],
+        x=df['day'],
         y=df['control_rate'],
         mode='lines+markers',
         name='Control Rate',
@@ -135,7 +136,7 @@ def generate_time_series_simulation(control_rate, variant_rate, visitors_per_day
     ))
     
     fig.add_trace(go.Scatter(
-        x=df['date'],
+        x=df['day'],
         y=df['variant_rate'],
         mode='lines+markers',
         name='Variant Rate',
@@ -144,7 +145,7 @@ def generate_time_series_simulation(control_rate, variant_rate, visitors_per_day
     
     # Add significance threshold line
     fig.add_trace(go.Scatter(
-        x=df['date'],
+        x=df['day'],
         y=[alpha] * len(df),
         mode='lines',
         name=f'Significance Threshold (p={alpha:.2f})',
@@ -153,7 +154,7 @@ def generate_time_series_simulation(control_rate, variant_rate, visitors_per_day
     
     # Add p-value line
     fig.add_trace(go.Scatter(
-        x=df['date'],
+        x=df['day'],
         y=df['p_value'],
         mode='lines+markers',
         name='p-value',
@@ -164,7 +165,12 @@ def generate_time_series_simulation(control_rate, variant_rate, visitors_per_day
     # Update layout
     fig.update_layout(
         title='Time Series View of A/B Test Significance',
-        xaxis_title='Date',
+        xaxis_title='Test Day',
+        xaxis=dict(
+            tickmode='linear',
+            dtick=1,
+            tick0=1
+        ),
         yaxis=dict(
             title='Conversion Rate',
             tickformat='.2%'
