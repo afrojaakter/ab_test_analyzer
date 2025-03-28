@@ -1,757 +1,712 @@
 import streamlit as st
-import pandas as pd
 import numpy as np
+import pandas as pd
+import math
+from utils import (
+    calculate_significance, calculate_confidence_interval, calculate_sample_size,
+    chi_square_test, t_test_for_means, generate_download_link, parse_uploaded_csv
+)
 import plotly.graph_objects as go
-import plotly.express as px
-from datetime import datetime, timedelta
-import utils
+import io
 
-# Set page config
+# Set page configuration
 st.set_page_config(
     page_title="A/B Test Significance Calculator",
     page_icon="📊",
     layout="wide"
 )
 
-# Custom styling
+# App title and description
+st.title("A/B Test Statistical Significance Calculator")
 st.markdown("""
-<style>
-    .main .block-container {
-        padding-top: 2rem;
-    }
-    .significance-result {
-        font-size: 1.2rem;
-        font-weight: bold;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        margin: 1rem 0;
-    }
-    .significant {
-        background-color: #d4edda;
-        color: #155724;
-    }
-    .not-significant {
-        background-color: #f8d7da;
-        color: #721c24;
-    }
-    .highlight {
-        background-color: #e9ecef;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        margin: 1rem 0;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# Title and description
-st.title("📊 A/B Test Significance Calculator")
-st.markdown("""
-This app helps you determine if your A/B test results are statistically significant or merely due to random chance.
-Simply input your test data below and get an instant significance analysis.
+This app helps you determine if your A/B test results are statistically significant.
+Enter the data from your experiment below to analyze the results.
 """)
 
-# Create tabs for different features
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "Basic A/B Test", 
-    "Multiple Variations", 
-    "Continuous Metrics", 
-    "Time Series Analysis", 
-    "Test Planning"
-])
-
-# ----------------------
-# Basic A/B Test Tab
-# ----------------------
-with tab1:
-    st.header("Basic A/B Test Analysis")
-    st.markdown("Compare two variations (A and B) to determine if there's a statistically significant difference.")
+# Sidebar with information about statistical methods
+with st.sidebar:
+    st.header("About Statistical Significance")
+    st.markdown("""
+    ### What is Statistical Significance?
+    Statistical significance helps determine if the difference between variant A and B is due to chance or a real effect.
     
+    ### Methods Used
+    This calculator uses:
+    - **Z-test for proportions**: Compares conversion rates between two groups
+    - **P-value**: Probability that the observed difference could occur by random chance
+    - **Confidence Intervals**: Range of plausible values for the true conversion rate
+    
+    ### Interpreting Results
+    - **p < 0.05**: Conventionally considered statistically significant (95% confidence)
+    - **p < 0.01**: Strong statistical significance (99% confidence)
+    - **Confidence Interval**: If the intervals don't overlap, the difference is likely significant
+    """)
+    
+    st.header("Sample Size Calculator")
+    st.markdown("Determine the sample size needed for your next test:")
+    
+    baseline_cr = st.number_input("Baseline conversion rate (%)", 
+                                  min_value=0.1, max_value=100.0, value=5.0, step=0.1) / 100
+    mde = st.number_input("Minimum detectable effect (%)", 
+                          min_value=1.0, max_value=100.0, value=10.0, step=0.5) / 100
+    confidence = st.slider("Confidence level", 
+                          min_value=80, max_value=99, value=95, step=1)
+    power = st.slider("Statistical power", 
+                      min_value=80, max_value=99, value=80, step=1)
+    
+    if st.button("Calculate Required Sample Size"):
+        sample_size = calculate_sample_size(baseline_cr, mde, confidence/100, power/100)
+        st.success(f"Required sample size per variant: **{sample_size:,}**")
+        st.markdown(f"Total sample size needed: **{sample_size*2:,}**")
+
+# Main form for A/B test data entry
+st.header("Enter Your A/B Test Data")
+
+# Add data import/export section
+st.markdown("### Data Import/Export")
+data_tabs = st.tabs(["Import Data", "Export Data"])
+
+with data_tabs[0]:
+    st.markdown("Upload your CSV file with A/B test data to automatically fill the form below.")
+    st.markdown("The CSV should have columns: `control_visitors`, `control_conversions`, `variant_visitors`, `variant_conversions`")
+    st.markdown("Alternatively, it can have columns: `date`, `group` (control or variant), `visitors`, `conversions`")
+    
+    uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
+    if uploaded_file is not None:
+        test_data = parse_uploaded_csv(uploaded_file)
+        if test_data:
+            st.success("Data loaded successfully!")
+            # We'll use these values later in the form
+            control_visitors_input = test_data['control_visitors']
+            control_conversions_input = test_data['control_conversions']
+            variant_visitors_input = test_data['variant_visitors']
+            variant_conversions_input = test_data['variant_conversions']
+        else:
+            st.error("Could not parse the CSV file. Make sure it has the correct format.")
+            control_visitors_input = 1000
+            control_conversions_input = 100
+            variant_visitors_input = 1000
+            variant_conversions_input = 120
+    else:
+        # Default values
+        control_visitors_input = 1000
+        control_conversions_input = 100
+        variant_visitors_input = 1000
+        variant_conversions_input = 120
+
+with data_tabs[1]:
+    st.markdown("Export your test data and results to a CSV file.")
+    
+    if 'results_generated' not in st.session_state:
+        st.session_state.results_generated = False
+        
+    if not st.session_state.results_generated:
+        st.info("Results will be available for export after you calculate significance.")
+    else:
+        # Create DataFrame with all the test data and results
+        export_data = pd.DataFrame({
+            'Metric': ['Visitors', 'Conversions', 'Conversion Rate', 'P-value', 'Significant', 'Confidence'],
+            'Control': [
+                st.session_state.control_visitors,
+                st.session_state.control_conversions,
+                f"{st.session_state.control_rate:.4f}",
+                f"{st.session_state.p_value:.4f}",
+                "Yes" if st.session_state.is_significant else "No",
+                f"{st.session_state.confidence_level:.1f}%"
+            ],
+            'Variant': [
+                st.session_state.variant_visitors,
+                st.session_state.variant_conversions,
+                f"{st.session_state.variant_rate:.4f}",
+                "",
+                "",
+                ""
+            ]
+        })
+        
+        st.dataframe(export_data)
+        st.markdown(generate_download_link(export_data, "ab_test_results.csv", "Download Results as CSV"), unsafe_allow_html=True)
+
+# Test type selection
+st.markdown("### Test Type")
+test_type = st.radio(
+    "Select Statistical Test",
+    ["Conversion Rate (Z-test)", "Conversion Rate (Chi-square)", "Continuous Metric (T-test)"],
+    horizontal=True
+)
+
+if test_type == "Conversion Rate (Z-test)" or test_type == "Conversion Rate (Chi-square)":
+    # Original conversion rate test form
     col1, col2 = st.columns(2)
     
     with col1:
         st.subheader("Control Group (A)")
-        control_visitors = st.number_input("Visitors A", min_value=1, value=1000, step=1, key="cv_basic")
-        control_conversions = st.number_input("Conversions A", min_value=0, value=150, step=1, key="cc_basic")
+        control_visitors = st.number_input("Visitors (A)", min_value=1, value=control_visitors_input, help="Total number of users in control group")
+        control_conversions = st.number_input("Conversions (A)", min_value=0, value=control_conversions_input, help="Number of conversions in control group")
         
+        # Add validation for control conversions
+        if control_conversions > control_visitors:
+            st.error("Conversions cannot exceed visitors!")
+            control_conversions = control_visitors
+    
     with col2:
         st.subheader("Variant Group (B)")
-        variant_visitors = st.number_input("Visitors B", min_value=1, value=1000, step=1, key="vv_basic")
-        variant_conversions = st.number_input("Conversions B", min_value=0, value=180, step=1, key="vc_basic")
-    
-    # Add upload CSV option
-    st.markdown("### Or upload your data")
-    uploaded_file = st.file_uploader("Upload CSV with test data", type=["csv"], key="uploader_basic")
-    
-    if uploaded_file is not None:
-        data = utils.parse_uploaded_csv(uploaded_file)
-        if data:
-            control_visitors = data["control_visitors"]
-            control_conversions = data["control_conversions"]
-            variant_visitors = data["variant_visitors"]
-            variant_conversions = data["variant_conversions"]
-            
-            st.success("Data successfully loaded from CSV!")
-        else:
-            st.error("Could not parse CSV. Make sure it has the correct format.")
-    
-    # Calculate conversion rates and differences
-    control_rate = control_conversions / control_visitors if control_visitors > 0 else 0
-    variant_rate = variant_conversions / variant_visitors if variant_visitors > 0 else 0
-    relative_difference = (variant_rate - control_rate) / control_rate if control_rate > 0 else 0
-    absolute_difference = variant_rate - control_rate
-    
-    # Display metrics
-    st.markdown("### Conversion Rates")
-    metric_col1, metric_col2, metric_col3 = st.columns(3)
-    
-    with metric_col1:
-        st.metric("Control Conversion Rate", f"{control_rate:.2%}")
-    
-    with metric_col2:
-        st.metric("Variant Conversion Rate", f"{variant_rate:.2%}")
-    
-    with metric_col3:
-        st.metric("Relative Difference", f"{relative_difference:.2%}", 
-                 delta=f"{absolute_difference:.2%}" if absolute_difference != 0 else None)
-    
-    # Statistical Test Selection
-    test_method = st.selectbox(
-        "Select Statistical Test",
-        ["Z-test (Default)", "Chi-square Test"],
-        index=0
-    )
-    
-    significance_level = st.slider("Significance Level (α)", 0.01, 0.10, 0.05, 0.01)
-    
-    # Calculate significance based on selected test
-    if test_method == "Z-test (Default)":
-        p_value, is_significant, test_stat = utils.calculate_significance(
-            control_conversions, control_visitors,
-            variant_conversions, variant_visitors,
-            significance_level
-        )
-        test_stat_name = "Z-score"
-    else:  # Chi-square
-        p_value, is_significant, test_stat = utils.chi_square_test(
-            control_conversions, control_visitors,
-            variant_conversions, variant_visitors,
-            significance_level
-        )
-        test_stat_name = "Chi-square"
-    
-    # Calculate confidence intervals
-    control_ci = utils.calculate_confidence_interval(control_conversions, control_visitors, 1 - significance_level)
-    variant_ci = utils.calculate_confidence_interval(variant_conversions, variant_visitors, 1 - significance_level)
-    
-    # Display results
-    st.markdown("### Results")
-    
-    # Significance result box
-    if is_significant:
-        st.markdown(f"""
-        <div class="significance-result significant">
-            ✅ Statistically Significant Result (p-value: {p_value:.4f})
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.markdown(f"""
-        <div class="significance-result not-significant">
-            ❌ Not Statistically Significant (p-value: {p_value:.4f})
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # Detailed results
-    with st.expander("Detailed Results", expanded=True):
-        st.markdown(f"""
-        - **P-value**: {p_value:.6f}
-        - **{test_stat_name}**: {test_stat:.4f}
-        - **Significance Level (α)**: {significance_level}
-        - **Control Confidence Interval**: [{control_ci[0]:.2%}, {control_ci[1]:.2%}]
-        - **Variant Confidence Interval**: [{variant_ci[0]:.2%}, {variant_ci[1]:.2%}]
-        """)
-    
-    # Visualization
-    st.markdown("### Visualization")
-    
-    # Bar chart with confidence intervals
-    fig = go.Figure()
-    
-    # Add bars for conversion rates
-    fig.add_trace(go.Bar(
-        x=['Control', 'Variant'],
-        y=[control_rate, variant_rate],
-        text=[f"{control_rate:.2%}", f"{variant_rate:.2%}"],
-        textposition='auto',
-        name='Conversion Rate',
-        marker_color=['#636EFA', '#EF553B']
-    ))
-    
-    # Add error bars for confidence intervals
-    fig.add_trace(go.Scatter(
-        x=['Control', 'Variant'],
-        y=[control_rate, variant_rate],
-        error_y=dict(
-            type='data',
-            symmetric=False,
-            array=[control_ci[1] - control_rate, variant_ci[1] - variant_rate],
-            arrayminus=[control_rate - control_ci[0], variant_rate - variant_ci[0]],
-            visible=True
-        ),
-        mode='markers',
-        marker=dict(color='rgba(0,0,0,0)'),
-        name='Confidence Interval'
-    ))
-    
-    fig.update_layout(
-        title='Conversion Rates with Confidence Intervals',
-        xaxis_title='Variation',
-        yaxis_title='Conversion Rate',
-        yaxis_tickformat='.2%',
-        showlegend=False
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Opportunity to download the results
-    results_df = pd.DataFrame({
-        'Metric': ['Visitors', 'Conversions', 'Conversion Rate', 'Confidence Interval (Lower)', 'Confidence Interval (Upper)'],
-        'Control': [control_visitors, control_conversions, control_rate, control_ci[0], control_ci[1]],
-        'Variant': [variant_visitors, variant_conversions, variant_rate, variant_ci[0], variant_ci[1]]
-    })
-    
-    st.markdown("### Export Results")
-    st.markdown(utils.generate_download_link(results_df, 'ab_test_results.csv', '📥 Download Results as CSV'), unsafe_allow_html=True)
-
-# ----------------------
-# Multiple Variations Tab
-# ----------------------
-with tab2:
-    st.header("Multiple Variations Analysis (A/B/C/n)")
-    st.markdown("Compare multiple variations against a control to determine if there are statistically significant differences.")
-    
-    # Get number of variations
-    num_variations = st.number_input("Number of Variations (Including Control)", min_value=2, max_value=10, value=3, step=1)
-    
-    variations = []
-    cols = st.columns(num_variations)
-    
-    visitors_list = []
-    conversions_list = []
-    
-    # Create input fields for each variation
-    for i in range(num_variations):
-        with cols[i]:
-            if i == 0:
-                st.subheader("Control (A)")
-            else:
-                st.subheader(f"Variant {chr(66+i-1)}")
-            
-            visitors = st.number_input(f"Visitors", min_value=1, value=1000, key=f"v{i}_multi")
-            conversions = st.number_input(f"Conversions", min_value=0, value=150 + (i * 10), key=f"c{i}_multi")
-            
-            visitors_list.append(visitors)
-            conversions_list.append(conversions)
+        variant_visitors = st.number_input("Visitors (B)", min_value=1, value=variant_visitors_input, help="Total number of users in variant group")
+        variant_conversions = st.number_input("Conversions (B)", min_value=0, value=variant_conversions_input, help="Number of conversions in variant group")
+        
+        # Add validation for variant conversions
+        if variant_conversions > variant_visitors:
+            st.error("Conversions cannot exceed visitors!")
+            variant_conversions = variant_visitors
     
     # Calculate conversion rates
-    conversion_rates = [conversions / visitors if visitors > 0 else 0 for conversions, visitors in zip(conversions_list, visitors_list)]
+    if control_visitors > 0:
+        control_rate = control_conversions / control_visitors
+    else:
+        control_rate = 0
     
-    # Calculate significance
-    try:
-        results = utils.calculate_multiple_variations_significance(conversions_list, visitors_list, alpha=0.05)
+    if variant_visitors > 0:
+        variant_rate = variant_conversions / variant_visitors
+    else:
+        variant_rate = 0
+    
+    # Display conversion rates
+    st.markdown("### Conversion Rates")
+    rate_cols = st.columns(3)
+    with rate_cols[0]:
+        st.metric("Control Conversion Rate", f"{control_rate:.2%}")
+    with rate_cols[1]:
+        st.metric("Variant Conversion Rate", f"{variant_rate:.2%}", 
+                delta=f"{(variant_rate - control_rate):.2%}", delta_color="normal")
+    with rate_cols[2]:
+        relative_change = ((variant_rate - control_rate) / control_rate) if control_rate > 0 else 0
+        st.metric("Relative Improvement", f"{relative_change:.2%}")
+
+elif test_type == "Continuous Metric (T-test)":
+    # Continuous metric form (T-test)
+    st.markdown("Enter mean, standard deviation, and sample size for continuous metrics like revenue or time spent.")
+    
+    cont_col1, cont_col2 = st.columns(2)
+    
+    with cont_col1:
+        st.subheader("Control Group (A)")
+        control_mean = st.number_input("Mean (A)", value=100.0, step=0.1, help="Average value in control group")
+        control_std = st.number_input("Standard Deviation (A)", min_value=0.1, value=20.0, step=0.1, help="Standard deviation in control group")
+        control_size = st.number_input("Sample Size (A)", min_value=2, value=1000, help="Number of samples in control group")
+    
+    with cont_col2:
+        st.subheader("Variant Group (B)")
+        variant_mean = st.number_input("Mean (B)", value=105.0, step=0.1, help="Average value in variant group")
+        variant_std = st.number_input("Standard Deviation (B)", min_value=0.1, value=20.0, step=0.1, help="Standard deviation in variant group")
+        variant_size = st.number_input("Sample Size (B)", min_value=2, value=1000, help="Number of samples in variant group")
+    
+    # Display metrics
+    st.markdown("### Metrics")
+    metric_cols = st.columns(3)
+    with metric_cols[0]:
+        st.metric("Control Mean", f"{control_mean:.2f}")
+    with metric_cols[1]:
+        st.metric("Variant Mean", f"{variant_mean:.2f}", 
+                delta=f"{(variant_mean - control_mean):.2f}", delta_color="normal")
+    with metric_cols[2]:
+        relative_change = ((variant_mean - control_mean) / control_mean) if control_mean != 0 else 0
+        st.metric("Relative Improvement", f"{relative_change:.2%}")
         
-        # Display results
-        st.markdown("### Results")
+
+
+# Calculate statistical significance when button is clicked
+if st.button("Calculate Significance"):
+    # Determine which test to run based on the selected test type
+    if test_type == "Continuous Metric (T-test)":
+        # T-test for continuous metrics
+        if control_size < 30 or variant_size < 30:
+            st.warning("⚠️ Warning: Sample size is small. Results may not be reliable.")
         
-        # Create a dataframe for results
-        results_df = pd.DataFrame({
-            'Variation': [f"Variant {chr(66+i)}" for i in range(num_variations-1)],
-            'Conversion Rate': [f"{rate:.2%}" for rate in conversion_rates[1:]],
-            'Lift vs Control': [f"{(rate-conversion_rates[0])/conversion_rates[0]:.2%}" if conversion_rates[0] > 0 else "N/A" for rate in conversion_rates[1:]],
-            'P-value': [f"{r[0]:.6f}" for r in results],
-            'Z-score': [f"{r[2]:.4f}" for r in results],
-            'Significant': ["✅" if r[1] else "❌" for r in results],
-            'Bonferroni-corrected P-value': [f"{r[3]:.6f}" for r in results],
-            'Significant (corrected)': ["✅" if r[4] else "❌" for r in results]
-        })
+        # Calculate significance using t-test
+        p_value, is_significant, t_stat = t_test_for_means(
+            control_mean, control_std, control_size,
+            variant_mean, variant_std, variant_size
+        )
         
-        st.dataframe(results_df)
+        # Display significance results
+        st.markdown("## Results Analysis")
         
-        # Visualization
+        # Create columns for the results
+        col1, col2, col3 = st.columns([2, 1, 2])
+        
+        with col1:
+            st.markdown("### Statistical Metrics")
+            st.markdown(f"**P-value:** {p_value:.4f}")
+            st.markdown(f"**T-statistic:** {t_stat:.4f}")
+            
+            if is_significant:
+                st.markdown(f"**Confidence:** >95%")
+            else:
+                confidence_level = (1 - p_value) * 100
+                if confidence_level > 0:
+                    st.markdown(f"**Confidence:** {confidence_level:.1f}%")
+                else:
+                    st.markdown(f"**Confidence:** Very low")
+        
+        with col2:
+            # Visual indicator of significance
+            if is_significant:
+                st.success("SIGNIFICANT")
+            else:
+                st.warning("NOT SIGNIFICANT")
+                
+        with col3:
+            # Calculate standard errors
+            control_se = control_std / math.sqrt(control_size)
+            variant_se = variant_std / math.sqrt(variant_size)
+            
+            # Calculate approximate 95% confidence intervals
+            z = 1.96  # z-score for 95% confidence
+            control_ci_lower = control_mean - z * control_se
+            control_ci_upper = control_mean + z * control_se
+            variant_ci_lower = variant_mean - z * variant_se
+            variant_ci_upper = variant_mean + z * variant_se
+            
+            st.markdown("### Confidence Intervals (95%)")
+            st.markdown(f"**Control:** [{control_ci_lower:.2f} - {control_ci_upper:.2f}]")
+            st.markdown(f"**Variant:** [{variant_ci_lower:.2f} - {variant_ci_upper:.2f}]")
+            
+            # Check if confidence intervals overlap
+            if control_ci_upper < variant_ci_lower or variant_ci_upper < control_ci_lower:
+                st.markdown("**Confidence intervals do not overlap**")
+            else:
+                st.markdown("**Confidence intervals overlap**")
+        
+        # Visualization of means with confidence intervals
         st.markdown("### Visualization")
         
-        # Bar chart with confidence intervals
+        # Create a DataFrame for plotting
+        df = pd.DataFrame({
+            'Group': ['Control', 'Variant'],
+            'Mean': [control_mean, variant_mean],
+            'Lower CI': [control_ci_lower, variant_ci_lower],
+            'Upper CI': [control_ci_upper, variant_ci_upper]
+        })
+        
+        # Create a bar chart with error bars using Plotly
         fig = go.Figure()
         
-        # Add bars for conversion rates
-        variation_names = ['Control'] + [f"Variant {chr(66+i)}" for i in range(num_variations-1)]
-        colors = px.colors.qualitative.Plotly
-        
+        # Add bars
         fig.add_trace(go.Bar(
-            x=variation_names,
-            y=conversion_rates,
-            text=[f"{cr:.2%}" for cr in conversion_rates],
-            textposition='auto',
-            marker_color=colors[:num_variations]
+            x=df['Group'],
+            y=df['Mean'],
+            error_y=dict(
+                type='data',
+                symmetric=False,
+                array=df['Upper CI'] - df['Mean'],
+                arrayminus=df['Mean'] - df['Lower CI']
+            ),
+            marker_color=['blue', 'green'],
+            width=0.5
         ))
         
+        # Update layout
         fig.update_layout(
-            title='Conversion Rates Across Variations',
-            xaxis_title='Variation',
-            yaxis_title='Conversion Rate',
-            yaxis_tickformat='.2%'
+            title='Mean Values with 95% Confidence Intervals',
+            xaxis_title='Group',
+            yaxis_title='Mean Value',
+            height=400
         )
         
         st.plotly_chart(fig, use_container_width=True)
         
-        # Download results
-        st.markdown("### Export Results")
-        st.markdown(utils.generate_download_link(results_df, 'multiple_variations_results.csv', '📥 Download Results as CSV'), unsafe_allow_html=True)
-    
-    except Exception as e:
-        st.error(f"Error calculating significance: {e}")
-
-# ----------------------
-# Continuous Metrics Tab
-# ----------------------
-with tab3:
-    st.header("Continuous Metrics Analysis")
-    st.markdown("Compare two variations using t-test for continuous metrics like average order value, time on page, etc.")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("Control Group (A)")
-        control_mean = st.number_input("Mean A", min_value=0.0, value=50.0, step=0.1, format="%.2f")
-        control_std = st.number_input("Standard Deviation A", min_value=0.1, value=10.0, step=0.1, format="%.2f")
-        control_size = st.number_input("Sample Size A", min_value=2, value=100, step=1)
+        # Save results to session state for export
+        st.session_state.results_generated = True
+        st.session_state.control_visitors = control_size
+        st.session_state.control_conversions = 0  # Not applicable for t-test
+        st.session_state.variant_visitors = variant_size
+        st.session_state.variant_conversions = 0  # Not applicable for t-test
+        st.session_state.control_rate = control_mean
+        st.session_state.variant_rate = variant_mean
+        st.session_state.p_value = p_value
+        st.session_state.is_significant = is_significant
+        st.session_state.confidence_level = (1 - p_value) * 100 if not is_significant else 95
         
-    with col2:
-        st.subheader("Variant Group (B)")
-        variant_mean = st.number_input("Mean B", min_value=0.0, value=52.5, step=0.1, format="%.2f")
-        variant_std = st.number_input("Standard Deviation B", min_value=0.1, value=10.0, step=0.1, format="%.2f")
-        variant_size = st.number_input("Sample Size B", min_value=2, value=100, step=1)
-    
-    significance_level_t = st.slider("Significance Level (α)", 0.01, 0.10, 0.05, 0.01, key="alpha_t")
-    
-    # Calculate significance
-    p_value, is_significant, t_stat = utils.t_test_for_means(
-        control_mean, control_std, control_size,
-        variant_mean, variant_std, variant_size,
-        significance_level_t
-    )
-    
-    # Calculate relative difference
-    relative_diff = (variant_mean - control_mean) / control_mean if control_mean != 0 else float('inf')
-    
-    # Display results
-    st.markdown("### Results")
-    
-    # Significance result box
-    if is_significant:
-        st.markdown(f"""
-        <div class="significance-result significant">
-            ✅ Statistically Significant Result (p-value: {p_value:.4f})
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.markdown(f"""
-        <div class="significance-result not-significant">
-            ❌ Not Statistically Significant (p-value: {p_value:.4f})
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # Detailed results
-    with st.expander("Detailed Results", expanded=True):
-        st.markdown(f"""
-        - **P-value**: {p_value:.6f}
-        - **T-statistic**: {t_stat:.4f}
-        - **Significance Level (α)**: {significance_level_t}
-        - **Absolute Difference**: {variant_mean - control_mean:.4f}
-        - **Relative Difference**: {relative_diff:.2%}
-        """)
-    
-    # Visualization
-    st.markdown("### Visualization")
-    
-    # Create normal distributions for visualization
-    x_control = np.linspace(control_mean - 3*control_std, control_mean + 3*control_std, 100)
-    y_control = stats.norm.pdf(x_control, control_mean, control_std)
-    
-    x_variant = np.linspace(variant_mean - 3*variant_std, variant_mean + 3*variant_std, 100)
-    y_variant = stats.norm.pdf(x_variant, variant_mean, variant_std)
-    
-    # Plot distributions
-    fig = go.Figure()
-    
-    fig.add_trace(go.Scatter(
-        x=x_control,
-        y=y_control,
-        mode='lines',
-        name='Control',
-        fill='tozeroy',
-        line=dict(color='#636EFA')
-    ))
-    
-    fig.add_trace(go.Scatter(
-        x=x_variant,
-        y=y_variant,
-        mode='lines',
-        name='Variant',
-        fill='tozeroy',
-        line=dict(color='#EF553B')
-    ))
-    
-    # Add mean lines
-    fig.add_vline(x=control_mean, line_dash="dash", line_color="#636EFA")
-    fig.add_vline(x=variant_mean, line_dash="dash", line_color="#EF553B")
-    
-    fig.update_layout(
-        title='Distribution Comparison',
-        xaxis_title='Value',
-        yaxis_title='Density',
-        legend=dict(
-            yanchor="top",
-            y=0.99,
-            xanchor="right",
-            x=0.99
-        )
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Opportunity to download the results
-    results_df = pd.DataFrame({
-        'Metric': ['Mean', 'Standard Deviation', 'Sample Size', 'T-statistic', 'P-value', 'Significant'],
-        'Control': [control_mean, control_std, control_size, '', '', ''],
-        'Variant': [variant_mean, variant_std, variant_size, t_stat, p_value, is_significant]
-    })
-    
-    st.markdown("### Export Results")
-    st.markdown(utils.generate_download_link(results_df, 'continuous_metrics_results.csv', '📥 Download Results as CSV'), unsafe_allow_html=True)
-
-# ----------------------
-# Time Series Analysis Tab
-# ----------------------
-with tab4:
-    st.header("Time Series Analysis")
-    st.markdown("See how statistical significance evolves over time in your A/B test.")
-    
-    # Two ways to provide time series data
-    data_option = st.radio(
-        "How would you like to provide time series data?",
-        ["Upload CSV", "Generate Sample Data"]
-    )
-    
-    time_series_data = None
-    
-    if data_option == "Upload CSV":
-        uploaded_ts_file = st.file_uploader(
-            "Upload CSV with daily data",
-            type=["csv"],
-            help="CSV should have columns: date, group (control/variant), visitors, conversions"
-        )
+        # Display interpretation
+        st.markdown("## Interpretation")
         
-        if uploaded_ts_file:
-            try:
-                df = pd.read_csv(uploaded_ts_file)
-                if all(col in df.columns for col in ['date', 'group', 'visitors', 'conversions']):
-                    time_series_data = df
-                    st.success("Data successfully loaded!")
-                else:
-                    st.error("CSV must have columns: date, group, visitors, conversions")
-            except Exception as e:
-                st.error(f"Error loading CSV: {e}")
-    
-    else:  # Generate sample data
-        st.markdown("### Generate Sample Data")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            days = st.slider("Number of Days", 7, 60, 30)
-            control_cr = st.slider("Control Conversion Rate", 0.01, 0.50, 0.15, 0.01)
-            daily_visitors = st.slider("Daily Visitors per Variation", 100, 5000, 1000, 100)
-        
-        with col2:
-            effect_start_day = st.slider("Effect Start Day", 1, days, days // 2)
-            variant_lift = st.slider("Variant Lift", -0.5, 2.0, 0.15, 0.05)
-            random_seed = st.slider("Random Seed", 1, 999, 42)
-        
-        np.random.seed(random_seed)
-        
-        # Generate dates
-        start_date = datetime.now() - timedelta(days=days)
-        date_list = [start_date + timedelta(days=i) for i in range(days)]
-        date_strs = [date.strftime('%Y-%m-%d') for date in date_list]
-        
-        # Generate data
-        data_rows = []
-        
-        for i, date in enumerate(date_strs):
-            # Control group
-            control_visitors = np.random.randint(int(daily_visitors * 0.9), int(daily_visitors * 1.1))
-            control_conversions = np.random.binomial(control_visitors, control_cr)
+        if is_significant:
+            st.success("""
+            ### ✅ Statistically Significant Result
             
-            data_rows.append({
-                'date': date,
-                'group': 'control',
-                'visitors': control_visitors,
-                'conversions': control_conversions
-            })
+            The difference between the control and variant means is statistically significant. 
+            This means the observed difference is likely not due to random chance.
+            """)
             
-            # Variant group with effect starting from effect_start_day
-            variant_visitors = np.random.randint(int(daily_visitors * 0.9), int(daily_visitors * 1.1))
-            if i >= effect_start_day - 1:
-                variant_cr = control_cr * (1 + variant_lift)
-            else:
-                variant_cr = control_cr
+            if variant_mean > control_mean:
+                st.markdown(f"""
+                The variant outperformed the control by {(variant_mean - control_mean):.2f} absolute difference
+                ({relative_change:.2%} relative improvement).
                 
-            variant_conversions = np.random.binomial(variant_visitors, variant_cr)
+                **Recommendation:** Consider implementing the variant.
+                """)
+            else:
+                st.markdown(f"""
+                The variant underperformed compared to the control by {(control_mean - variant_mean):.2f} absolute difference
+                ({-relative_change:.2%} relative decrease).
+                
+                **Recommendation:** Stick with the control or test a new variant.
+                """)
+        else:
+            st.warning("""
+            ### ⚠️ Not Statistically Significant
             
-            data_rows.append({
-                'date': date,
-                'group': 'variant',
-                'visitors': variant_visitors,
-                'conversions': variant_conversions
-            })
-        
-        time_series_data = pd.DataFrame(data_rows)
-        
-        st.markdown("### Preview of Generated Data")
-        st.dataframe(time_series_data.head(6))
+            The difference between the control and variant means is not statistically significant.
+            This means the observed difference might be due to random chance.
+            """)
+            
+            if p_value < 0.1:
+                st.markdown("""
+                The result is trending towards significance. You might consider:
+                - Continuing the test to collect more data
+                - Analyzing specific segments where the effect might be stronger
+                """)
+            else:
+                st.markdown("""
+                There's little evidence of a meaningful difference between the variants. You might consider:
+                - Ending the test and trying a different approach
+                - Checking if there might be implementation issues with your test
+                """)
     
-    # If time series data is available, analyze it
-    if time_series_data is not None:
-        try:
-            dates, p_values, is_significant_list, control_rates, variant_rates = utils.analyze_time_series(time_series_data)
-            
-            # Display results
-            st.markdown("### Time Series Results")
-            
-            # Convert to strings for display
-            date_strs = [pd.to_datetime(date).strftime('%Y-%m-%d') for date in dates]
-            
-            # Create dataframe for results
-            results_df = pd.DataFrame({
-                'Date': date_strs,
-                'Control Rate': [f"{cr:.2%}" for cr in control_rates],
-                'Variant Rate': [f"{vr:.2%}" for vr in variant_rates],
-                'Lift': [f"{(vr-cr)/cr:.2%}" if cr > 0 else "N/A" for vr, cr in zip(variant_rates, control_rates)],
-                'P-Value': [f"{pv:.4f}" for pv in p_values],
-                'Significant': ["✅" if sig else "❌" for sig in is_significant_list]
-            })
-            
-            # Show tabular data
-            with st.expander("Show Tabular Data", expanded=False):
-                st.dataframe(results_df)
-            
-            # Visualization
-            st.markdown("### Visualization")
-            
-            # Create line chart for conversion rates
-            fig1 = go.Figure()
-            
-            fig1.add_trace(go.Scatter(
-                x=date_strs,
-                y=control_rates,
-                mode='lines+markers',
-                name='Control Rate',
-                line=dict(color='#636EFA')
-            ))
-            
-            fig1.add_trace(go.Scatter(
-                x=date_strs,
-                y=variant_rates,
-                mode='lines+markers',
-                name='Variant Rate',
-                line=dict(color='#EF553B')
-            ))
-            
-            fig1.update_layout(
-                title='Conversion Rates Over Time',
-                xaxis_title='Date',
-                yaxis_title='Conversion Rate',
-                yaxis_tickformat='.2%',
-                legend=dict(
-                    yanchor="top",
-                    y=0.99,
-                    xanchor="right",
-                    x=0.99
-                )
+    elif test_type == "Conversion Rate (Chi-square)":
+        # Chi-square test for conversion rates
+        if control_visitors < 30 or variant_visitors < 30:
+            st.warning("⚠️ Warning: Sample size is small. Results may not be reliable.")
+        
+        # Check for zero conversions
+        if control_conversions == 0 and variant_conversions == 0:
+            st.error("Cannot calculate significance when both groups have zero conversions.")
+        else:
+            # Calculate significance using chi-square test
+            p_value, is_significant, chi2_stat = chi_square_test(
+                control_conversions, control_visitors,
+                variant_conversions, variant_visitors
             )
             
-            # Create line chart for p-values
-            fig2 = go.Figure()
+            # Calculate confidence intervals
+            control_ci = calculate_confidence_interval(control_conversions, control_visitors)
+            variant_ci = calculate_confidence_interval(variant_conversions, variant_visitors)
             
-            # Add significance threshold line
-            fig2.add_hline(y=0.05, line_dash="dash", line_color="red")
+            # Display significance results
+            st.markdown("## Results Analysis")
             
-            fig2.add_trace(go.Scatter(
-                x=date_strs,
-                y=p_values,
-                mode='lines+markers',
-                name='P-Value',
-                line=dict(color='#00CC96')
-            ))
-            
-            # Color regions based on significance
-            for i in range(len(date_strs)):
-                if is_significant_list[i]:
-                    fig2.add_vrect(
-                        x0=i-0.5,
-                        x1=i+0.5,
-                        fillcolor="green",
-                        opacity=0.15,
-                        layer="below",
-                        line_width=0
-                    )
-            
-            fig2.update_layout(
-                title='P-Values Over Time (Red Line = 0.05 Threshold)',
-                xaxis_title='Date',
-                yaxis_title='P-Value',
-                yaxis_type="log",
-                showlegend=False
-            )
-            
-            col1, col2 = st.columns(2)
+            # Create columns for the results
+            col1, col2, col3 = st.columns([2, 1, 2])
             
             with col1:
-                st.plotly_chart(fig1, use_container_width=True)
+                st.markdown("### Statistical Metrics")
+                st.markdown(f"**P-value:** {p_value:.4f}")
+                st.markdown(f"**Chi-square statistic:** {chi2_stat:.4f}")
+                
+                if is_significant:
+                    st.markdown(f"**Confidence:** >95%")
+                else:
+                    confidence_level = (1 - p_value) * 100
+                    if confidence_level > 0:
+                        st.markdown(f"**Confidence:** {confidence_level:.1f}%")
+                    else:
+                        st.markdown(f"**Confidence:** Very low")
             
             with col2:
-                st.plotly_chart(fig2, use_container_width=True)
+                # Visual indicator of significance
+                if is_significant:
+                    st.success("SIGNIFICANT")
+                else:
+                    st.warning("NOT SIGNIFICANT")
+                    
+            with col3:
+                st.markdown("### Confidence Intervals (95%)")
+                st.markdown(f"**Control:** [{control_ci[0]:.2%} - {control_ci[1]:.2%}]")
+                st.markdown(f"**Variant:** [{variant_ci[0]:.2%} - {variant_ci[1]:.2%}]")
+                
+                # Check if confidence intervals overlap
+                if control_ci[1] < variant_ci[0] or variant_ci[1] < control_ci[0]:
+                    st.markdown("**Confidence intervals do not overlap**")
+                else:
+                    st.markdown("**Confidence intervals overlap**")
             
-            # Download time series data
-            st.markdown("### Export Results")
-            st.markdown(utils.generate_download_link(results_df, 'time_series_results.csv', '📥 Download Results as CSV'), unsafe_allow_html=True)
+            # Visualization of conversion rates with confidence intervals
+            st.markdown("### Visualization")
             
-            # Current test status
-            st.markdown("### Current Test Status")
-            final_p_value = p_values[-1]
-            final_significance = is_significant_list[-1]
+            # Create a DataFrame for plotting
+            df = pd.DataFrame({
+                'Group': ['Control', 'Variant'],
+                'Conversion Rate': [control_rate, variant_rate],
+                'Lower CI': [control_ci[0], variant_ci[0]],
+                'Upper CI': [control_ci[1], variant_ci[1]]
+            })
             
-            if final_significance:
-                st.markdown(f"""
-                <div class="significance-result significant">
-                    ✅ Currently Statistically Significant (p-value: {final_p_value:.4f})
-                </div>
-                """, unsafe_allow_html=True)
+            # Create a bar chart with error bars using Plotly
+            fig = go.Figure()
+            
+            # Add bars
+            fig.add_trace(go.Bar(
+                x=df['Group'],
+                y=df['Conversion Rate'],
+                error_y=dict(
+                    type='data',
+                    symmetric=False,
+                    array=df['Upper CI'] - df['Conversion Rate'],
+                    arrayminus=df['Conversion Rate'] - df['Lower CI']
+                ),
+                marker_color=['blue', 'green'],
+                width=0.5
+            ))
+            
+            # Update layout
+            fig.update_layout(
+                title='Conversion Rates with 95% Confidence Intervals',
+                xaxis_title='Group',
+                yaxis_title='Conversion Rate',
+                yaxis_tickformat='.2%',
+                height=400
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Save results to session state for export
+            st.session_state.results_generated = True
+            st.session_state.control_visitors = control_visitors
+            st.session_state.control_conversions = control_conversions
+            st.session_state.variant_visitors = variant_visitors
+            st.session_state.variant_conversions = variant_conversions
+            st.session_state.control_rate = control_rate
+            st.session_state.variant_rate = variant_rate
+            st.session_state.p_value = p_value
+            st.session_state.is_significant = is_significant
+            st.session_state.confidence_level = (1 - p_value) * 100 if not is_significant else 95
+            
+            # Display interpretation
+            st.markdown("## Interpretation")
+            
+            if is_significant:
+                st.success("""
+                ### ✅ Statistically Significant Result
+                
+                The difference between the control and variant groups is statistically significant. 
+                This means the observed difference is likely not due to random chance.
+                """)
+                
+                if variant_rate > control_rate:
+                    st.markdown(f"""
+                    The variant outperformed the control by {(variant_rate - control_rate):.2%} absolute difference
+                    ({relative_change:.2%} relative improvement).
+                    
+                    **Recommendation:** Consider implementing the variant.
+                    """)
+                else:
+                    st.markdown(f"""
+                    The variant underperformed compared to the control by {(control_rate - variant_rate):.2%} absolute difference
+                    ({-relative_change:.2%} relative decrease).
+                    
+                    **Recommendation:** Stick with the control or test a new variant.
+                    """)
             else:
-                st.markdown(f"""
-                <div class="significance-result not-significant">
-                    ❌ Not Yet Statistically Significant (p-value: {final_p_value:.4f})
-                </div>
-                """, unsafe_allow_html=True)
+                st.warning("""
+                ### ⚠️ Not Statistically Significant
+                
+                The difference between the control and variant groups is not statistically significant.
+                This means the observed difference might be due to random chance.
+                """)
+                
+                if p_value < 0.1:
+                    st.markdown("""
+                    The result is trending towards significance. You might consider:
+                    - Continuing the test to collect more data
+                    - Analyzing specific segments where the effect might be stronger
+                    """)
+                else:
+                    st.markdown("""
+                    There's little evidence of a meaningful difference between the variants. You might consider:
+                    - Ending the test and trying a different approach
+                    - Checking if there might be implementation issues with your test
+                    """)
+    
+    else:  # Z-test (default)
+        if control_visitors < 30 or variant_visitors < 30:
+            st.warning("⚠️ Warning: Sample size is small. Results may not be reliable.")
+        
+        # Check for zero conversions
+        if control_conversions == 0 and variant_conversions == 0:
+            st.error("Cannot calculate significance when both groups have zero conversions.")
+        else:
+            # Calculate significance using z-test
+            p_value, is_significant, z_score = calculate_significance(
+                control_conversions, control_visitors, 
+                variant_conversions, variant_visitors
+            )
             
-        except Exception as e:
-            st.error(f"Error analyzing time series data: {e}")
+            # Calculate confidence intervals
+            control_ci = calculate_confidence_interval(control_conversions, control_visitors)
+            variant_ci = calculate_confidence_interval(variant_conversions, variant_visitors)
+            
+            # Display significance results
+            st.markdown("## Results Analysis")
+            
+            # Create columns for the results
+            col1, col2, col3 = st.columns([2, 1, 2])
+            
+            with col1:
+                st.markdown("### Statistical Metrics")
+                st.markdown(f"**P-value:** {p_value:.4f}")
+                st.markdown(f"**Z-score:** {z_score:.4f}")
+                
+                if is_significant:
+                    st.markdown(f"**Confidence:** >95%")
+                else:
+                    confidence_level = (1 - p_value) * 100
+                    if confidence_level > 0:
+                        st.markdown(f"**Confidence:** {confidence_level:.1f}%")
+                    else:
+                        st.markdown(f"**Confidence:** Very low")
+            
+            with col2:
+                # Visual indicator of significance
+                if is_significant:
+                    st.success("SIGNIFICANT")
+                else:
+                    st.warning("NOT SIGNIFICANT")
+                    
+            with col3:
+                st.markdown("### Confidence Intervals (95%)")
+                st.markdown(f"**Control:** [{control_ci[0]:.2%} - {control_ci[1]:.2%}]")
+                st.markdown(f"**Variant:** [{variant_ci[0]:.2%} - {variant_ci[1]:.2%}]")
+                
+                # Check if confidence intervals overlap
+                if control_ci[1] < variant_ci[0] or variant_ci[1] < control_ci[0]:
+                    st.markdown("**Confidence intervals do not overlap**")
+                else:
+                    st.markdown("**Confidence intervals overlap**")
+            
+            # Visualization of conversion rates with confidence intervals
+            st.markdown("### Visualization")
+            
+            # Create a DataFrame for plotting
+            df = pd.DataFrame({
+                'Group': ['Control', 'Variant'],
+                'Conversion Rate': [control_rate, variant_rate],
+                'Lower CI': [control_ci[0], variant_ci[0]],
+                'Upper CI': [control_ci[1], variant_ci[1]]
+            })
+            
+            # Create a bar chart with error bars using Plotly
+            fig = go.Figure()
+            
+            # Add bars
+            fig.add_trace(go.Bar(
+                x=df['Group'],
+                y=df['Conversion Rate'],
+                error_y=dict(
+                    type='data',
+                    symmetric=False,
+                    array=df['Upper CI'] - df['Conversion Rate'],
+                    arrayminus=df['Conversion Rate'] - df['Lower CI']
+                ),
+                marker_color=['blue', 'green'],
+                width=0.5
+            ))
+            
+            # Update layout
+            fig.update_layout(
+                title='Conversion Rates with 95% Confidence Intervals',
+                xaxis_title='Group',
+                yaxis_title='Conversion Rate',
+                yaxis_tickformat='.2%',
+                height=400
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Save results to session state for export
+            st.session_state.results_generated = True
+            st.session_state.control_visitors = control_visitors
+            st.session_state.control_conversions = control_conversions
+            st.session_state.variant_visitors = variant_visitors
+            st.session_state.variant_conversions = variant_conversions
+            st.session_state.control_rate = control_rate
+            st.session_state.variant_rate = variant_rate
+            st.session_state.p_value = p_value
+            st.session_state.is_significant = is_significant
+            st.session_state.confidence_level = (1 - p_value) * 100 if not is_significant else 95
+            
+            # Display interpretation
+            st.markdown("## Interpretation")
+            
+            if is_significant:
+                st.success("""
+                ### ✅ Statistically Significant Result
+                
+                The difference between the control and variant groups is statistically significant. 
+                This means the observed difference is likely not due to random chance.
+                """)
+                
+                if variant_rate > control_rate:
+                    st.markdown(f"""
+                    The variant outperformed the control by {(variant_rate - control_rate):.2%} absolute difference
+                    ({relative_change:.2%} relative improvement).
+                    
+                    **Recommendation:** Consider implementing the variant.
+                    """)
+                else:
+                    st.markdown(f"""
+                    The variant underperformed compared to the control by {(control_rate - variant_rate):.2%} absolute difference
+                    ({-relative_change:.2%} relative decrease).
+                    
+                    **Recommendation:** Stick with the control or test a new variant.
+                    """)
+            else:
+                st.warning("""
+                ### ⚠️ Not Statistically Significant
+                
+                The difference between the control and variant groups is not statistically significant.
+                This means the observed difference might be due to random chance.
+                """)
+                
+                if p_value < 0.1:
+                    st.markdown("""
+                    The result is trending towards significance. You might consider:
+                    - Continuing the test to collect more data
+                    - Analyzing specific segments where the effect might be stronger
+                    """)
+                else:
+                    st.markdown("""
+                    There's little evidence of a meaningful difference between the variants. You might consider:
+                    - Ending the test and trying a different approach
+                    - Checking if there might be implementation issues with your test
+                    """)
+    
+    # Additional considerations for all test types
+    st.markdown("""
+    ### Additional Considerations
+    
+    - **Practical Significance:** Even with statistical significance, consider if the improvement is practically meaningful
+    - **Test Duration:** Ensure your test ran for at least 1-2 full business cycles
+    - **Segment Analysis:** Consider analyzing specific user segments for deeper insights
+    - **Multiple Testing:** If you're running multiple tests, adjust your significance threshold
+    """)
 
-# ----------------------
-# Test Planning Tab
-# ----------------------
-with tab5:
-    st.header("Test Planning")
-    st.markdown("Plan your A/B test: Calculate required sample size and test duration based on expected metrics.")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("Test Parameters")
-        baseline_cr = st.slider("Baseline Conversion Rate", 0.001, 0.50, 0.05, 0.001, format="%.3f")
-        mde = st.slider("Minimum Detectable Effect (Relative Lift)", 0.01, 1.00, 0.15, 0.01)
-        
-        st.markdown(f"### Goals")
-        st.markdown(f"""
-        You want to detect a change of at least **{mde:.0%}** from the baseline conversion rate of **{baseline_cr:.2%}**.
-        
-        This means detecting when the variant rate is ≥ **{baseline_cr * (1 + mde):.2%}** or ≤ **{baseline_cr * (1 - mde):.2%}**.
-        """)
-    
-    with col2:
-        st.subheader("Statistical Parameters")
-        confidence = st.slider("Confidence Level", 0.8, 0.99, 0.95, 0.01)
-        power = st.slider("Statistical Power", 0.7, 0.99, 0.8, 0.01)
-        
-        st.markdown(f"### What this means")
-        st.markdown(f"""
-        - **{confidence:.0%} Confidence**: You want to be {confidence:.0%} certain that a detected effect is real
-        - **{power:.0%} Power**: You want to be {power:.0%} certain that you can detect the minimum effect if it exists
-        """)
-    
-    # Calculate sample size
-    sample_size = utils.calculate_sample_size(baseline_cr, mde, confidence, power)
-    
-    st.markdown("### Required Sample Size")
-    st.markdown(f"""
-    <div class="highlight">
-        <h4>You need <span style="color:#FF4B4B;">{sample_size:,}</span> visitors per variation</h4>
-        <p>Total visitors needed: <strong>{sample_size * 2:,}</strong> (for both control and variant)</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Test duration calculator
-    st.subheader("Calculate Test Duration")
-    
-    daily_traffic = st.number_input("Average Daily Visitors (to your entire website)", min_value=10, value=5000, step=100)
-    traffic_allocation = st.slider("Traffic Allocation to Test (%)", 10, 100, 50, 5) / 100
-    
-    daily_test_traffic = daily_traffic * traffic_allocation
-    daily_visitors_per_variant = daily_test_traffic / 2
-    
-    test_days = utils.calculate_test_duration(baseline_cr, mde, daily_visitors_per_variant, confidence, power)
-    
-    st.markdown("### Test Duration Estimate")
-    st.markdown(f"""
-    <div class="highlight">
-        <h4>Your test will take approximately <span style="color:#FF4B4B;">{test_days}</span> days</h4>
-        <p>Based on:</p>
-        <ul>
-            <li>Daily traffic: {daily_traffic:,} visitors</li>
-            <li>Test allocation: {traffic_allocation:.0%}</li>
-            <li>Each variation gets: {int(daily_visitors_per_variant):,} visitors per day</li>
-        </ul>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Additional information
-    with st.expander("Tips for Successful A/B Testing"):
-        st.markdown("""
-        ### Best Practices
-        
-        1. **Always decide on your success metrics before starting the test**
-           - Avoid changing your success metrics during or after the test
-        
-        2. **Run the test for the pre-calculated duration**
-           - Don't stop early just because you see significance
-           - Don't extend indefinitely if you don't see the results you want
-        
-        3. **Consider seasonal factors**
-           - Make sure your test period doesn't include unusual events or holidays
-           - For highly seasonal businesses, plan tests during representative periods
-        
-        4. **Start with high-impact changes**
-           - Test changes that have the potential for larger impact first
-           - Small changes often require larger sample sizes to detect significance
-        
-        5. **Test only one change at a time**
-           - Multivariate testing requires exponentially larger sample sizes
-           - Simple A/B tests make it clear what caused the observed effect
-        
-        6. **Ensure random assignment**
-           - Make sure users are randomly assigned to variations
-           - Check that your test groups have similar characteristics
-        """)
-
-# Footer
+# Footer with additional info
 st.markdown("---")
-st.markdown("### About")
-st.markdown("""
-This tool is designed to help you analyze and plan A/B tests with statistical rigor. 
-It implements industry-standard statistical methods to ensure your test results are reliable.
 
-For binary metrics (like conversion rates), we use the Z-test for proportions or Chi-Square test.
-For continuous metrics (like revenue, time on page), we use Welch's t-test which doesn't assume equal variances.
-
-Multiple comparison corrections (like Bonferroni) are applied when testing multiple variations to control the family-wise error rate.
-""")
+# Update footer based on selected test type
+if test_type == "Continuous Metric (T-test)":
+    st.markdown("""
+    **Note:** This calculator uses Welch's t-test for comparing means of continuous metrics,
+    which is appropriate for revenue, time spent, or other continuous variables. 
+    It doesn't assume equal variances between groups.
+    """)
+elif test_type == "Conversion Rate (Chi-square)":
+    st.markdown("""
+    **Note:** This calculator uses a Chi-square test for comparing proportions,
+    which is appropriate for most A/B testing scenarios with binary (conversion/no-conversion) outcomes.
+    """)
+else:  # Z-test
+    st.markdown("""
+    **Note:** This calculator uses a two-tailed Z-test for proportions to calculate statistical significance, 
+    which is appropriate for most A/B testing scenarios with binary (conversion/no-conversion) outcomes.
+    """)
