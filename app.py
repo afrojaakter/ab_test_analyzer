@@ -1207,8 +1207,9 @@ with duration_cols[0]:
         min_value=0.8, 
         max_value=0.99, 
         value=0.95, 
-        step=0.01, 
+        step=0.05, 
         format="%.0f%%",
+        help="Common values: 90%, 95%, 99%",
         key="duration_confidence"
     )
     
@@ -1217,8 +1218,9 @@ with duration_cols[0]:
         min_value=0.7, 
         max_value=0.99, 
         value=0.8, 
-        step=0.01, 
+        step=0.05, 
         format="%.0f%%",
+        help="Common values: 80%, 85%, 90%",
         key="duration_power"
     )
 
@@ -1540,8 +1542,10 @@ with viz_tabs[0]:
                           key="ts_days")
     with ts_cols2[1]:
         ts_confidence = st.slider("Confidence Level", 
-                                min_value=0.8, max_value=0.99, value=0.95, step=0.01, 
-                                format="%.0f%%", key="ts_confidence")
+                                min_value=0.8, max_value=0.99, value=0.95, step=0.05, 
+                                format="%.0f%%", 
+                                help="Common values: 90%, 95%, 99%",
+                                key="ts_confidence")
     
     if st.button("Generate Time Series Simulation", key="btn_ts_sim"):
         # Run the simulation
@@ -1718,12 +1722,16 @@ with viz_tabs[2]:
                                         step=0.001, format="%.3f", key="power_baseline")
     with power_cols[1]:
         power_confidence = st.slider("Confidence Level", 
-                                   min_value=0.8, max_value=0.99, value=0.95, step=0.01, 
-                                   format="%.0f%%", key="power_confidence")
+                                   min_value=0.8, max_value=0.99, value=0.95, step=0.05, 
+                                   format="%.0f%%", 
+                                   help="Common values: 90%, 95%, 99%",
+                                   key="power_confidence")
     with power_cols[2]:
         power_level = st.slider("Statistical Power", 
-                              min_value=0.7, max_value=0.99, value=0.8, step=0.01, 
-                              format="%.0f%%", key="power_level")
+                              min_value=0.7, max_value=0.99, value=0.8, step=0.05, 
+                              format="%.0f%%", 
+                              help="Common values: 80%, 85%, 90%",
+                              key="power_level")
     
     if st.button("Generate Power Analysis", key="btn_power"):
         # Create power analysis curves
