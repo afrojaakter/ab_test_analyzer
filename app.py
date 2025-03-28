@@ -131,7 +131,7 @@ with data_tabs[1]:
 st.markdown("### Test Type")
 test_type = st.radio(
     "Select Statistical Test",
-    ["Conversion Rate (Z-test)", "Conversion Rate (Chi-square)", "Continuous Metric (T-test)"],
+    ["Conversion Rate (Z-test)", "Conversion Rate (Chi-square)", "Continuous Metric (T-test)", "Multiple Variants (A/B/C/n)"],
     horizontal=True
 )
 
@@ -212,6 +212,160 @@ elif test_type == "Continuous Metric (T-test)":
         relative_change = ((variant_mean - control_mean) / control_mean) if control_mean != 0 else 0
         st.metric("Relative Improvement", f"{relative_change:.2%}")
         
+elif test_type == "Multiple Variants (A/B/C/n)":
+    # Multiple variants testing (A/B/C/n)
+    st.markdown("### Compare Multiple Variants")
+    metric_type = st.radio(
+        "Select Metric Type",
+        ["Conversion Rate", "Continuous Metric (Mean)"],
+        horizontal=True
+    )
+    
+    # Number of variants selection
+    num_variants = st.number_input("Number of Variants", min_value=2, max_value=10, value=3, 
+                                  help="Total number of variants to compare (including control)")
+    
+    if metric_type == "Conversion Rate":
+        # Create a form for conversion rate data
+        st.markdown("### Enter Conversion Data")
+        
+        conversion_data = []
+        labels = []
+        
+        for i in range(num_variants):
+            variant_letter = chr(65 + i)
+            variant_name = "Control" if i == 0 else f"Variant {variant_letter}"
+            labels.append(variant_name)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader(variant_name)
+                visitors = st.number_input(f"Visitors ({variant_letter})", min_value=1, value=1000, 
+                                         key=f"visitors_{i}")
+            
+            with col2:
+                st.write(" ")  # Spacer for alignment
+                conversions = st.number_input(f"Conversions ({variant_letter})", min_value=0, value=100 + (i * 10),
+                                           max_value=visitors, key=f"conversions_{i}")
+                
+                # Calculate and show conversion rate
+                rate = conversions / visitors
+                st.metric(f"Conversion Rate ({variant_letter})", f"{rate:.2%}")
+            
+            # Add to our data collection
+            conversion_data.append({"visitors": visitors, "conversions": conversions, "rate": rate})
+        
+        # Display data summary
+        st.markdown("### Conversion Rates Summary")
+        summary_data = pd.DataFrame({
+            'Variant': labels,
+            'Visitors': [data["visitors"] for data in conversion_data],
+            'Conversions': [data["conversions"] for data in conversion_data],
+            'Conversion Rate': [data["rate"] for data in conversion_data]
+        })
+        
+        st.dataframe(summary_data)
+        
+        # Create a bar chart to visualize the rates
+        fig = go.Figure(data=[
+            go.Bar(
+                x=labels,
+                y=[data["rate"] for data in conversion_data],
+                text=[f"{data['rate']:.2%}" for data in conversion_data],
+                textposition='auto',
+                marker_color=['blue'] + ['green'] * (num_variants - 1)
+            )
+        ])
+        
+        fig.update_layout(
+            title='Conversion Rates Comparison',
+            xaxis_title='Variant',
+            yaxis_title='Conversion Rate',
+            yaxis_tickformat='.2%',
+            height=400
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+    else:  # Continuous Metric
+        # Create a form for continuous metric data
+        st.markdown("### Enter Continuous Metric Data")
+        
+        continuous_data = []
+        labels = []
+        
+        for i in range(num_variants):
+            variant_letter = chr(65 + i)
+            variant_name = "Control" if i == 0 else f"Variant {variant_letter}"
+            labels.append(variant_name)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader(variant_name)
+                mean = st.number_input(f"Mean ({variant_letter})", value=100.0 + (i * 5), step=0.1,
+                                     key=f"mean_{i}")
+                std = st.number_input(f"Standard Deviation ({variant_letter})", min_value=0.1, value=20.0, 
+                                    step=0.1, key=f"std_{i}")
+            
+            with col2:
+                st.write(" ")  # Spacer for alignment
+                sample_size = st.number_input(f"Sample Size ({variant_letter})", min_value=2, value=1000,
+                                           key=f"size_{i}")
+                
+                # Calculate standard error
+                se = std / math.sqrt(sample_size)
+                st.metric(f"Standard Error ({variant_letter})", f"{se:.2f}")
+            
+            # Add to our data collection
+            continuous_data.append({
+                "mean": mean, 
+                "std": std, 
+                "sample_size": sample_size,
+                "se": se
+            })
+        
+        # Display data summary
+        st.markdown("### Metrics Summary")
+        summary_data = pd.DataFrame({
+            'Variant': labels,
+            'Mean': [data["mean"] for data in continuous_data],
+            'Standard Deviation': [data["std"] for data in continuous_data],
+            'Sample Size': [data["sample_size"] for data in continuous_data],
+            'Standard Error': [data["se"] for data in continuous_data]
+        })
+        
+        st.dataframe(summary_data)
+        
+        # Create a bar chart with error bars to visualize the means
+        fig = go.Figure()
+        
+        # Calculate confidence intervals (95%)
+        ci_lower = [data["mean"] - 1.96 * data["se"] for data in continuous_data]
+        ci_upper = [data["mean"] + 1.96 * data["se"] for data in continuous_data]
+        
+        # Add bars with error bars
+        fig.add_trace(go.Bar(
+            x=labels,
+            y=[data["mean"] for data in continuous_data],
+            error_y=dict(
+                type='data',
+                symmetric=False,
+                array=[u - m for u, m in zip(ci_upper, [data["mean"] for data in continuous_data])],
+                arrayminus=[m - l for l, m in zip(ci_lower, [data["mean"] for data in continuous_data])]
+            ),
+            text=[f"{data['mean']:.2f}" for data in continuous_data],
+            textposition='auto',
+            marker_color=['blue'] + ['green'] * (num_variants - 1)
+        ))
+        
+        fig.update_layout(
+            title='Mean Values with 95% Confidence Intervals',
+            xaxis_title='Variant',
+            yaxis_title='Mean Value',
+            height=400
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
 
 
 # Calculate statistical significance when button is clicked
@@ -372,6 +526,312 @@ if st.button("Calculate Significance"):
                 - Ending the test and trying a different approach
                 - Checking if there might be implementation issues with your test
                 """)
+    
+    elif test_type == "Multiple Variants (A/B/C/n)":
+        if metric_type == "Conversion Rate":
+            # Check for valid sample sizes
+            if any(data["visitors"] < 30 for data in conversion_data):
+                st.warning("⚠️ Warning: Some variants have small sample sizes. Results may not be reliable.")
+            
+            # Check for zero conversions in all groups
+            if all(data["conversions"] == 0 for data in conversion_data):
+                st.error("Cannot calculate significance when all groups have zero conversions.")
+            else:
+                # Prepare data for the chi-square test
+                conversions_list = [data["conversions"] for data in conversion_data]
+                visitors_list = [data["visitors"] for data in conversion_data]
+                
+                # Run chi-square test for multiple proportions
+                chi2_stat, p_value, is_significant, result_df = multi_proportion_test(
+                    conversions_list, visitors_list, labels
+                )
+                
+                # Run pairwise comparisons
+                pairwise_df = pairwise_proportion_test(conversions_list, visitors_list, labels)
+                
+                # Display results
+                st.markdown("## Results Analysis")
+                
+                # Create columns for the results
+                col1, col2 = st.columns([3, 1])
+                
+                with col1:
+                    st.markdown("### Statistical Metrics")
+                    st.markdown(f"**Chi-square statistic:** {chi2_stat:.4f}")
+                    st.markdown(f"**P-value:** {p_value:.4f}")
+                    st.markdown(f"**Degrees of freedom:** {len(labels) - 1}")
+                    
+                    if is_significant:
+                        st.markdown(f"**Confidence:** >95%")
+                    else:
+                        confidence_level = (1 - p_value) * 100
+                        if confidence_level > 0:
+                            st.markdown(f"**Confidence:** {confidence_level:.1f}%")
+                        else:
+                            st.markdown(f"**Confidence:** Very low")
+                
+                with col2:
+                    # Visual indicator of significance
+                    if is_significant:
+                        st.success("SIGNIFICANT")
+                    else:
+                        st.warning("NOT SIGNIFICANT")
+                
+                # Display pairwise comparison results
+                st.markdown("### Pairwise Comparisons")
+                st.markdown("Results adjusted with Bonferroni correction for multiple comparisons.")
+                st.dataframe(pairwise_df)
+                
+                # Calculate confidence intervals for each variant
+                confidence_intervals = []
+                for i, data in enumerate(conversion_data):
+                    ci = calculate_confidence_interval(data["conversions"], data["visitors"])
+                    confidence_intervals.append({
+                        "variant": labels[i],
+                        "lower": ci[0],
+                        "upper": ci[1]
+                    })
+                
+                # Create visualization with confidence intervals
+                st.markdown("### Visualization with Confidence Intervals")
+                
+                # Create a DataFrame for plotting
+                ci_df = pd.DataFrame(confidence_intervals)
+                
+                # Create a bar chart with error bars using Plotly
+                fig = go.Figure()
+                
+                # Add bars
+                fig.add_trace(go.Bar(
+                    x=[data["variant"] for data in confidence_intervals],
+                    y=[data["rate"] for data in conversion_data],
+                    error_y=dict(
+                        type='data',
+                        symmetric=False,
+                        array=[ci["upper"] - data["rate"] for ci, data in zip(confidence_intervals, conversion_data)],
+                        arrayminus=[data["rate"] - ci["lower"] for ci, data in zip(confidence_intervals, conversion_data)]
+                    ),
+                    marker_color=['blue'] + ['green'] * (len(labels) - 1),
+                    width=0.6
+                ))
+                
+                # Update layout
+                fig.update_layout(
+                    title='Conversion Rates with 95% Confidence Intervals',
+                    xaxis_title='Variant',
+                    yaxis_title='Conversion Rate',
+                    yaxis_tickformat='.2%',
+                    height=500
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Display interpretation
+                st.markdown("## Interpretation")
+                
+                if is_significant:
+                    st.success("""
+                    ### ✅ Statistically Significant Differences Detected
+                    
+                    There are statistically significant differences among the variants. This means at least one variant 
+                    performs differently than the others, and the observed differences are likely not due to random chance.
+                    """)
+                    
+                    # Find best performer
+                    best_idx = np.argmax([data["rate"] for data in conversion_data])
+                    best_variant = labels[best_idx]
+                    best_rate = conversion_data[best_idx]["rate"]
+                    
+                    control_idx = 0  # Control is always the first variant
+                    control_rate = conversion_data[control_idx]["rate"]
+                    
+                    if best_idx != control_idx:
+                        improvement = (best_rate - control_rate) / control_rate if control_rate > 0 else float('inf')
+                        st.markdown(f"""
+                        **Best performer:** {best_variant} with {best_rate:.2%} conversion rate
+                        ({improvement:.2%} improvement over Control)
+                        
+                        **Recommendation:** Look at the pairwise comparisons to confirm which specific variants differ 
+                        significantly from each other. Consider implementing the best-performing variant.
+                        """)
+                    else:
+                        st.markdown(f"""
+                        **Best performer:** The Control with {control_rate:.2%} conversion rate
+                        
+                        **Recommendation:** Keep the current implementation (Control) since it outperforms 
+                        the variants. Consider testing new variants with different approaches.
+                        """)
+                else:
+                    st.warning("""
+                    ### ⚠️ No Statistically Significant Differences
+                    
+                    There are no statistically significant differences among the variants. This means the observed 
+                    differences might be due to random chance.
+                    """)
+                    
+                    if p_value < 0.1:
+                        st.markdown("""
+                        The result is trending towards significance. You might consider:
+                        - Continuing the test to collect more data
+                        - Analyzing specific segments where differences might be stronger
+                        """)
+                    else:
+                        st.markdown("""
+                        There's little evidence of meaningful differences between the variants. You might consider:
+                        - Ending the test and trying different approaches
+                        - Testing more distinct variations
+                        - Checking if there might be implementation issues with your test
+                        """)
+        
+        else:  # Continuous metric
+            # Check for valid sample sizes
+            if any(data["sample_size"] < 30 for data in continuous_data):
+                st.warning("⚠️ Warning: Some variants have small sample sizes. Results may not be reliable.")
+            
+            # Prepare data for ANOVA test
+            anova_data = {}
+            for i, data in enumerate(continuous_data):
+                # Create a normal distribution for each variant based on mean and std
+                np.random.seed(42 + i)  # For reproducibility, different for each variant
+                anova_data[labels[i]] = np.random.normal(
+                    data["mean"], data["std"], size=min(data["sample_size"], 1000)
+                )
+            
+            # Run ANOVA test
+            f_stat, p_value, is_significant = multi_comparison_anova(anova_data)
+            
+            # Run Tukey's HSD test for pairwise comparisons
+            results_df, all_pairs_df = pairwise_tukey_hsd(anova_data, labels)
+            
+            # Display results
+            st.markdown("## Results Analysis")
+            
+            # Create columns for the results
+            col1, col2 = st.columns([3, 1])
+            
+            with col1:
+                st.markdown("### Statistical Metrics")
+                st.markdown(f"**F-statistic:** {f_stat:.4f}")
+                st.markdown(f"**P-value:** {p_value:.4f}")
+                st.markdown(f"**Degrees of freedom:** {len(labels) - 1}, {sum([len(vals) for vals in anova_data.values()]) - len(labels)}")
+                
+                if is_significant:
+                    st.markdown(f"**Confidence:** >95%")
+                else:
+                    confidence_level = (1 - p_value) * 100
+                    if confidence_level > 0:
+                        st.markdown(f"**Confidence:** {confidence_level:.1f}%")
+                    else:
+                        st.markdown(f"**Confidence:** Very low")
+            
+            with col2:
+                # Visual indicator of significance
+                if is_significant:
+                    st.success("SIGNIFICANT")
+                else:
+                    st.warning("NOT SIGNIFICANT")
+            
+            # Display group statistics
+            st.markdown("### Group Statistics")
+            st.dataframe(results_df)
+            
+            # Display pairwise comparison results
+            st.markdown("### Pairwise Comparisons (Tukey HSD)")
+            st.markdown("Tukey's Honestly Significant Difference test for all pairs of variants.")
+            st.dataframe(all_pairs_df)
+            
+            # Create visualization with confidence intervals
+            st.markdown("### Visualization with Confidence Intervals")
+            
+            # Create a bar chart with error bars using Plotly
+            fig = go.Figure()
+            
+            # Calculate 95% confidence intervals
+            ci_lower = [data["mean"] - 1.96 * data["se"] for data in continuous_data]
+            ci_upper = [data["mean"] + 1.96 * data["se"] for data in continuous_data]
+            
+            # Add bars with error bars
+            fig.add_trace(go.Bar(
+                x=labels,
+                y=[data["mean"] for data in continuous_data],
+                error_y=dict(
+                    type='data',
+                    symmetric=False,
+                    array=[u - m for u, m in zip(ci_upper, [data["mean"] for data in continuous_data])],
+                    arrayminus=[m - l for l, m in zip([data["mean"] for data in continuous_data], ci_lower)]
+                ),
+                text=[f"{data['mean']:.2f}" for data in continuous_data],
+                textposition='auto',
+                marker_color=['blue'] + ['green'] * (len(labels) - 1),
+                width=0.6
+            ))
+            
+            # Update layout
+            fig.update_layout(
+                title='Mean Values with 95% Confidence Intervals',
+                xaxis_title='Variant',
+                yaxis_title='Mean Value',
+                height=500
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Display interpretation
+            st.markdown("## Interpretation")
+            
+            if is_significant:
+                st.success("""
+                ### ✅ Statistically Significant Differences Detected
+                
+                There are statistically significant differences among the variants. This means at least one variant 
+                performs differently than the others, and the observed differences are likely not due to random chance.
+                """)
+                
+                # Find best performer
+                best_idx = np.argmax([data["mean"] for data in continuous_data])
+                best_variant = labels[best_idx]
+                best_mean = continuous_data[best_idx]["mean"]
+                
+                control_idx = 0  # Control is always the first variant
+                control_mean = continuous_data[control_idx]["mean"]
+                
+                if best_idx != control_idx:
+                    improvement = (best_mean - control_mean) / control_mean if control_mean != 0 else float('inf')
+                    st.markdown(f"""
+                    **Best performer:** {best_variant} with mean value of {best_mean:.2f}
+                    ({improvement:.2%} improvement over Control)
+                    
+                    **Recommendation:** Look at the pairwise comparisons to confirm which specific variants differ 
+                    significantly from each other. Consider implementing the best-performing variant.
+                    """)
+                else:
+                    st.markdown(f"""
+                    **Best performer:** The Control with mean value of {control_mean:.2f}
+                    
+                    **Recommendation:** Keep the current implementation (Control) since it outperforms 
+                    the variants. Consider testing new variants with different approaches.
+                    """)
+            else:
+                st.warning("""
+                ### ⚠️ No Statistically Significant Differences
+                
+                There are no statistically significant differences among the variants. This means the observed 
+                differences might be due to random chance.
+                """)
+                
+                if p_value < 0.1:
+                    st.markdown("""
+                    The result is trending towards significance. You might consider:
+                    - Continuing the test to collect more data
+                    - Analyzing specific segments where differences might be stronger
+                    """)
+                else:
+                    st.markdown("""
+                    There's little evidence of meaningful differences between the variants. You might consider:
+                    - Ending the test and trying different approaches
+                    - Testing more distinct variations
+                    - Checking if there might be implementation issues with your test
+                    """)
     
     elif test_type == "Conversion Rate (Chi-square)":
         # Chi-square test for conversion rates

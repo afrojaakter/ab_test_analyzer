@@ -290,3 +290,208 @@ def parse_uploaded_csv(uploaded_file):
     except Exception as e:
         print(f"Error parsing CSV: {e}")
         return None
+        
+def multi_comparison_anova(data):
+    """
+    Perform ANOVA test to compare multiple variants.
+    
+    Parameters:
+    -----------
+    data: dict
+        Dictionary with variant names as keys and lists of values as values
+    
+    Returns:
+    --------
+    tuple: (f_statistic, p_value, is_significant)
+    """
+    groups = list(data.values())
+    
+    # Check if we have at least 2 groups
+    if len(groups) < 2:
+        return 0, 1.0, False
+    
+    # Perform one-way ANOVA
+    f_stat, p_value = stats.f_oneway(*groups)
+    
+    # Determine if result is significant
+    is_significant = p_value < 0.05
+    
+    return f_stat, p_value, is_significant
+
+def pairwise_tukey_hsd(data, labels=None, alpha=0.05):
+    """
+    Perform pairwise Tukey HSD test to compare all pairs of variants.
+    
+    Parameters:
+    -----------
+    data: dict
+        Dictionary with variant names as keys and lists of values as values
+    labels: list
+        List of group labels (optional)
+    alpha: float
+        Significance level (default: 0.05)
+        
+    Returns:
+    --------
+    tuple: (results_df, all_pairs_df)
+    """
+    from statsmodels.stats.multicomp import pairwise_tukeyhsd
+    import pandas as pd
+    
+    # Prepare data for Tukey's test
+    all_values = []
+    group_labels = []
+    
+    if labels is None:
+        labels = list(data.keys())
+    
+    for i, (group, values) in enumerate(data.items()):
+        all_values.extend(values)
+        group_labels.extend([labels[i]] * len(values))
+    
+    # Perform Tukey's HSD test
+    tukey_results = pairwise_tukeyhsd(all_values, group_labels, alpha=alpha)
+    
+    # Create dataframe with all pairs results
+    all_pairs_df = pd.DataFrame({
+        'Group 1': tukey_results.groupsunique[tukey_results.pairindices[:,0]],
+        'Group 2': tukey_results.groupsunique[tukey_results.pairindices[:,1]],
+        'Mean Diff': tukey_results.meandiffs,
+        'P-Value': tukey_results.pvalues,
+        'Significant': tukey_results.reject,
+        'Lower CI': tukey_results.confint[:,0],
+        'Upper CI': tukey_results.confint[:,1]
+    })
+    
+    # Create summary dataframe
+    results_df = pd.DataFrame({
+        'Group': labels,
+        'Mean': [np.mean(data[label] if label in data else []) for label in labels],
+        'Count': [len(data[label] if label in data else []) for label in labels],
+        'Std Dev': [np.std(data[label] if label in data else [], ddof=1) for label in labels]
+    })
+    
+    return results_df, all_pairs_df
+
+def multi_proportion_test(conversions, visitors, labels=None, alpha=0.05):
+    """
+    Perform chi-square test of independence for multiple proportions.
+    
+    Parameters:
+    -----------
+    conversions: list
+        List of conversion counts for each variant
+    visitors: list
+        List of visitor counts for each variant
+    labels: list
+        List of group labels (optional)
+    alpha: float
+        Significance level (default: 0.05)
+        
+    Returns:
+    --------
+    tuple: (chi2_stat, p_value, is_significant, df)
+    """
+    import pandas as pd
+    
+    # Create contingency table
+    contingency_table = np.array([
+        conversions,
+        np.array(visitors) - np.array(conversions)
+    ])
+    
+    # Perform chi-square test
+    chi2_stat, p_value, dof, expected = stats.chi2_contingency(contingency_table)
+    
+    # Determine if result is significant
+    is_significant = p_value < alpha
+    
+    # If labels not provided, create default ones
+    if labels is None:
+        labels = [f"Variant {chr(65+i)}" for i in range(len(conversions))]
+    
+    # Create dataframe with results
+    df = pd.DataFrame({
+        'Group': labels,
+        'Conversions': conversions,
+        'Visitors': visitors,
+        'Conversion Rate': np.array(conversions) / np.array(visitors),
+    })
+    
+    return chi2_stat, p_value, is_significant, df
+
+def pairwise_proportion_test(conversions, visitors, labels=None, alpha=0.05):
+    """
+    Perform pairwise comparisons of proportions with Bonferroni correction.
+    
+    Parameters:
+    -----------
+    conversions: list
+        List of conversion counts for each variant
+    visitors: list
+        List of visitor counts for each variant
+    labels: list
+        List of group labels (optional)
+    alpha: float
+        Significance level (default: 0.05)
+        
+    Returns:
+    --------
+    DataFrame: Results of pairwise comparisons
+    """
+    import pandas as pd
+    from itertools import combinations
+    
+    # If labels not provided, create default ones
+    if labels is None:
+        labels = [f"Variant {chr(65+i)}" for i in range(len(conversions))]
+    
+    # Get all pairwise combinations
+    n_groups = len(conversions)
+    n_comparisons = n_groups * (n_groups - 1) // 2
+    
+    # Apply Bonferroni correction
+    alpha_corrected = alpha / n_comparisons
+    
+    results = []
+    
+    for i, j in combinations(range(n_groups), 2):
+        # For each pair, perform z-test for proportions
+        p1 = conversions[i] / visitors[i]
+        p2 = conversions[j] / visitors[j]
+        
+        # Calculate pooled probability
+        p_pooled = (conversions[i] + conversions[j]) / (visitors[i] + visitors[j])
+        
+        # Calculate standard error
+        se = math.sqrt(p_pooled * (1 - p_pooled) * (1/visitors[i] + 1/visitors[j]))
+        
+        # Handle division by zero
+        if se == 0:
+            z_score = 0
+            p_value = 1.0
+        else:
+            # Calculate z-score
+            z_score = (p2 - p1) / se
+            
+            # Calculate p-value (two-tailed test)
+            p_value = 2 * (1 - stats.norm.cdf(abs(z_score)))
+        
+        # Determine if significant with Bonferroni correction
+        is_significant = p_value < alpha_corrected
+        
+        # Add result to list
+        results.append({
+            'Group 1': labels[i],
+            'Group 2': labels[j],
+            'Rate 1': p1,
+            'Rate 2': p2,
+            'Difference': p2 - p1,
+            'Relative Diff': (p2 - p1) / p1 if p1 > 0 else np.inf,
+            'Z-Score': z_score,
+            'P-Value': p_value,
+            'Significant': is_significant,
+            'Alpha (corrected)': alpha_corrected
+        })
+    
+    return pd.DataFrame(results)
