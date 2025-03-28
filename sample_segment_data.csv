@@ -1,0 +1,13 @@
+segment,group,visitors,conversions
+Mobile Users,control,5000,250
+Mobile Users,variant,5100,320
+Desktop Users,control,3000,210
+Desktop Users,variant,2950,200
+New Users,control,4000,120
+New Users,variant,4100,150
+Returning Users,control,2500,200
+Returning Users,variant,2600,230
+US Users,control,3500,315
+US Users,variant,3600,342
+EU Users,control,2800,196
+EU Users,variant,2850,222

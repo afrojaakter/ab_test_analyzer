@@ -655,3 +655,117 @@ def calculate_power_for_proportion(p1, p2, n1, n2, confidence=0.95):
     power = 1 - stats.norm.cdf(z_alpha - delta) + stats.norm.cdf(-z_alpha - delta)
     
     return power
+
+def create_segment_comparison_chart(segment_results):
+    """
+    Create a visualization comparing A/B test results across different segments.
+    
+    Parameters:
+    -----------
+    segment_results: pd.DataFrame
+        DataFrame with segment analysis results
+        
+    Returns:
+    --------
+    plotly.graph_objects.Figure: Segment comparison chart
+    """
+    if len(segment_results) == 0:
+        return None
+    
+    # Create a copy to avoid modifying the original DataFrame
+    df = segment_results.copy()
+    
+    # Format percentages for better display
+    df['control_rate_pct'] = df['control_rate'] * 100
+    df['variant_rate_pct'] = df['variant_rate'] * 100
+    df['relative_diff_pct'] = df['relative_diff'] * 100
+    
+    # Create main figure for conversion rates comparison
+    fig1 = go.Figure()
+    
+    # Add control rates
+    fig1.add_trace(go.Bar(
+        x=df['segment'],
+        y=df['control_rate_pct'],
+        name='Control Rate',
+        marker_color='blue',
+        text=[f"{x:.2f}%" for x in df['control_rate_pct']],
+        textposition='auto'
+    ))
+    
+    # Add variant rates
+    fig1.add_trace(go.Bar(
+        x=df['segment'],
+        y=df['variant_rate_pct'],
+        name='Variant Rate',
+        marker_color='green',
+        text=[f"{x:.2f}%" for x in df['variant_rate_pct']],
+        textposition='auto'
+    ))
+    
+    # Update layout
+    fig1.update_layout(
+        title='Conversion Rates by Segment',
+        xaxis_title='Segment',
+        yaxis_title='Conversion Rate (%)',
+        barmode='group',
+        height=400
+    )
+    
+    # Create second figure for relative difference
+    fig2 = go.Figure()
+    
+    # Add bar colors based on significance
+    bar_colors = ['green' if sig else 'grey' for sig in df['significant']]
+    
+    # Add relative difference
+    fig2.add_trace(go.Bar(
+        x=df['segment'],
+        y=df['relative_diff_pct'],
+        name='Relative Difference',
+        marker_color=bar_colors,
+        text=[f"{x:.2f}% {'✓' if sig else ''}" for x, sig in zip(df['relative_diff_pct'], df['significant'])],
+        textposition='auto'
+    ))
+    
+    # Add horizontal line at 0
+    fig2.add_hline(y=0, line_dash="dash", line_color="black")
+    
+    # Update layout
+    fig2.update_layout(
+        title='Relative Difference by Segment (✓ = Statistically Significant)',
+        xaxis_title='Segment',
+        yaxis_title='Relative Difference (%)',
+        height=400
+    )
+    
+    # Create third figure for p-values
+    fig3 = go.Figure()
+    
+    # Add p-values
+    fig3.add_trace(go.Bar(
+        x=df['segment'],
+        y=df['p_value'],
+        name='P-Value',
+        marker_color=['green' if p < 0.05 else 'red' for p in df['p_value']],
+        text=[f"{p:.4f}" for p in df['p_value']],
+        textposition='auto'
+    ))
+    
+    # Add significance threshold
+    fig3.add_hline(y=0.05, line_dash="dash", line_color="black",
+                   annotation_text="Significance Threshold (p=0.05)")
+    
+    # Update layout
+    fig3.update_layout(
+        title='P-Values by Segment',
+        xaxis_title='Segment',
+        yaxis_title='P-Value',
+        height=400
+    )
+    
+    return {
+        'conversion_rates': fig1,
+        'relative_diff': fig2,
+        'p_values': fig3
+    }

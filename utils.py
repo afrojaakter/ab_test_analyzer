@@ -506,3 +506,113 @@ def pairwise_proportion_test(conversions, visitors, labels=None, alpha=0.05):
         })
     
     return pd.DataFrame(results)
+
+def parse_segment_data(uploaded_file):
+    """
+    Parse an uploaded CSV file with segment data.
+    
+    Parameters:
+    -----------
+    uploaded_file: BytesIO
+        Uploaded file object from Streamlit
+        
+    Returns:
+    --------
+    pd.DataFrame or None: DataFrame with parsed segment data or None if parsing failed
+    """
+    try:
+        df = pd.read_csv(uploaded_file)
+        required_columns = ['segment', 'group', 'visitors', 'conversions']
+        
+        # Check if all required columns are present
+        if all(col in df.columns for col in required_columns):
+            # Validate data types and values
+            if (df['visitors'].dtypes == int or df['visitors'].dtypes == float) and \
+               (df['conversions'].dtypes == int or df['conversions'].dtypes == float) and \
+               df['segment'].notna().all() and df['group'].notna().all() and \
+               (df['visitors'] >= 0).all() and (df['conversions'] >= 0).all() and \
+               (df['conversions'] <= df['visitors']).all():
+                return df
+        
+        return None
+    except Exception as e:
+        print(f"Error parsing segment data: {e}")
+        return None
+
+def analyze_segments(segment_data):
+    """
+    Analyze A/B test results across different segments.
+    
+    Parameters:
+    -----------
+    segment_data: pd.DataFrame
+        DataFrame with columns: segment, group, visitors, conversions
+        
+    Returns:
+    --------
+    dict: Dictionary with segment analysis results
+    """
+    results = []
+    segment_list = segment_data['segment'].unique()
+    
+    for segment in segment_list:
+        segment_df = segment_data[segment_data['segment'] == segment]
+        
+        # Get control and variant data for this segment
+        control_data = segment_df[segment_df['group'] == 'control']
+        variant_data = segment_df[segment_df['group'] == 'variant']
+        
+        if len(control_data) == 0 or len(variant_data) == 0:
+            continue
+            
+        control_visitors = control_data['visitors'].sum()
+        control_conversions = control_data['conversions'].sum()
+        variant_visitors = variant_data['visitors'].sum()
+        variant_conversions = variant_data['conversions'].sum()
+        
+        # Calculate rates
+        control_rate = control_conversions / control_visitors if control_visitors > 0 else 0
+        variant_rate = variant_conversions / variant_visitors if variant_visitors > 0 else 0
+        
+        # Calculate absolute and relative difference
+        absolute_diff = variant_rate - control_rate
+        relative_diff = absolute_diff / control_rate if control_rate > 0 else float('inf')
+        
+        # Calculate statistical significance
+        p_value, is_significant, z_score = calculate_significance(
+            control_conversions, control_visitors,
+            variant_conversions, variant_visitors
+        )
+        
+        # Calculate confidence intervals
+        control_ci_lower, control_ci_upper = calculate_confidence_interval(control_conversions, control_visitors)
+        variant_ci_lower, variant_ci_upper = calculate_confidence_interval(variant_conversions, variant_visitors)
+        
+        results.append({
+            'segment': segment,
+            'control_visitors': control_visitors,
+            'control_conversions': control_conversions,
+            'control_rate': control_rate,
+            'control_ci_lower': control_ci_lower,
+            'control_ci_upper': control_ci_upper,
+            'variant_visitors': variant_visitors,
+            'variant_conversions': variant_conversions,
+            'variant_rate': variant_rate,
+            'variant_ci_lower': variant_ci_lower,
+            'variant_ci_upper': variant_ci_upper,
+            'absolute_diff': absolute_diff,
+            'relative_diff': relative_diff,
+            'p_value': p_value,
+            'significant': is_significant,
+            'z_score': z_score
+        })
+    
+    results_df = pd.DataFrame(results)
+    if len(results_df) > 0:
+        # Sort segments by effect size (relative difference) in descending order
+        results_df = results_df.sort_values(by='relative_diff', ascending=False)
+        
+    return {
+        'results_df': results_df,
+        'segment_list': segment_list
+    }

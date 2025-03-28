@@ -1170,6 +1170,122 @@ from advanced_visualizations import (
 from scipy import stats
 
 st.markdown("---")
+st.header("Segment Analysis")
+st.markdown("""
+Analyze how different user segments respond to your A/B test variants.
+Upload segment data to discover which segments show the strongest response.
+""")
+
+# File uploader for segment data
+uploaded_segment_file = st.file_uploader("Upload Segment Data CSV", type="csv", key="segment_data")
+
+if uploaded_segment_file is not None:
+    # Parse the segment data
+    from utils import parse_segment_data, analyze_segments
+    from advanced_visualizations import create_segment_comparison_chart
+    
+    segment_data = parse_segment_data(uploaded_segment_file)
+    
+    if segment_data is not None:
+        st.success("Segment data loaded successfully!")
+        
+        # Display raw data in an expandable section
+        with st.expander("View Raw Segment Data"):
+            st.dataframe(segment_data)
+        
+        # Show expected format example if user wants to see it
+        with st.expander("Expected CSV Format"):
+            st.markdown("""
+            Your CSV should have these columns:
+            - `segment`: The name or ID of the segment (e.g., 'Mobile Users', 'Desktop Users')
+            - `group`: Either 'control' or 'variant'
+            - `visitors`: Number of visitors in this segment and group
+            - `conversions`: Number of conversions in this segment and group
+            
+            Example:
+            ```
+            segment,group,visitors,conversions
+            Mobile Users,control,5000,250
+            Mobile Users,variant,5100,280
+            Desktop Users,control,3000,210
+            Desktop Users,variant,2950,200
+            New Users,control,4000,120
+            New Users,variant,4100,150
+            ```
+            """)
+        
+        # Analyze the segments
+        segment_analysis = analyze_segments(segment_data)
+        results_df = segment_analysis['results_df']
+        
+        if len(results_df) > 0:
+            # Display segment analysis results
+            st.subheader("Segment Performance Summary")
+            
+            # Format the results for display
+            display_df = results_df.copy()
+            display_df['control_rate'] = display_df['control_rate'].apply(lambda x: f"{x:.2%}")
+            display_df['variant_rate'] = display_df['variant_rate'].apply(lambda x: f"{x:.2%}")
+            display_df['relative_diff'] = display_df['relative_diff'].apply(lambda x: f"{x:.2%}")
+            display_df['p_value'] = display_df['p_value'].apply(lambda x: f"{x:.4f}")
+            display_df['significant'] = display_df['significant'].apply(lambda x: "✓" if x else "")
+            
+            display_columns = ['segment', 'control_visitors', 'control_conversions', 'control_rate', 
+                              'variant_visitors', 'variant_conversions', 'variant_rate', 
+                              'relative_diff', 'p_value', 'significant']
+            
+            st.dataframe(display_df[display_columns])
+            
+            # Create and display visualizations
+            charts = create_segment_comparison_chart(results_df)
+            
+            if charts:
+                st.plotly_chart(charts['conversion_rates'], use_container_width=True)
+                st.plotly_chart(charts['relative_diff'], use_container_width=True)
+                st.plotly_chart(charts['p_values'], use_container_width=True)
+                
+                # Add key insights and takeaways
+                st.subheader("Key Insights")
+                
+                # Find top performing segment
+                top_segment = results_df.iloc[0]['segment']
+                top_lift = results_df.iloc[0]['relative_diff']
+                is_significant = results_df.iloc[0]['significant']
+                
+                st.markdown(f"""
+                - **Top performing segment**: {top_segment} with {top_lift:.2%} lift 
+                  {" (statistically significant ✓)" if is_significant else " (not statistically significant yet)"}
+                - **Number of segments analyzed**: {len(results_df)}
+                - **Segments with significant results**: {results_df['significant'].sum()} out of {len(results_df)}
+                """)
+                
+                # Provide actionable recommendations
+                st.subheader("Recommendations")
+                
+                if results_df['significant'].sum() > 0:
+                    sig_segments = results_df[results_df['significant']]['segment'].tolist()
+                    st.markdown(f"""
+                    - Consider targeting **{', '.join(sig_segments)}** with the variant, as these segments show statistically significant improvement.
+                    - For segments without significant results, continue the test to gather more data or consider a different approach.
+                    """)
+                else:
+                    st.markdown("""
+                    - No segments show statistically significant results yet. Consider:
+                      - Running the test longer to collect more data
+                      - Reviewing the variant design to better target specific segments
+                      - Investigating if the segments are properly defined
+                    """)
+        else:
+            st.warning("No valid segment pairs found in the data. Make sure each segment has both control and variant groups.")
+    else:
+        st.error("""
+        Could not parse the segment data. Make sure your CSV has the correct format with these columns:
+        - segment: The name or ID of the segment
+        - group: Either 'control' or 'variant'
+        - visitors: Number of visitors 
+        - conversions: Number of conversions
+        """)
+
 st.header("Advanced Visualizations")
 st.markdown("""
 These visualizations help you better understand your test results and plan future experiments.
