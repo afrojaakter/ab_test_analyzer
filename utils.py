@@ -352,17 +352,20 @@ def pairwise_tukey_hsd(data, labels=None, alpha=0.05):
     # Perform Tukey's HSD test
     tukey_results = pairwise_tukeyhsd(all_values, group_labels, alpha=alpha)
     
-    # Create dataframe with all pairs results - using data directly from the Tukey results object
-    all_pairs_df = pd.DataFrame(data=np.column_stack([
-        tukey_results.data[0], 
-        tukey_results.data[1], 
-        tukey_results.meandiffs, 
-        tukey_results.pvalues, 
-        tukey_results.reject, 
-        tukey_results.confint[:,0], 
-        tukey_results.confint[:,1]
-    ]), 
-    columns=['Group 1', 'Group 2', 'Mean Diff', 'P-Value', 'Significant', 'Lower CI', 'Upper CI'])
+    # Create dataframe with all pairs results - more compatible approach
+    pairs = []
+    for i in range(len(tukey_results.pvalues)):
+        pairs.append({
+            'Group 1': tukey_results.data[0][i],
+            'Group 2': tukey_results.data[1][i],
+            'Mean Diff': tukey_results.meandiffs[i],
+            'P-Value': tukey_results.pvalues[i],
+            'Significant': tukey_results.reject[i],
+            'Lower CI': tukey_results.confint[i, 0],
+            'Upper CI': tukey_results.confint[i, 1]
+        })
+    
+    all_pairs_df = pd.DataFrame(pairs)
     
     # Create summary dataframe
     results_df = pd.DataFrame({
