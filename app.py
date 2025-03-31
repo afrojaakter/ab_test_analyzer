@@ -1170,7 +1170,7 @@ from advanced_visualizations import (
 from scipy import stats
 
 st.markdown("---")
-st.header("Test Duration Calculator")
+st.header("Test Duration Calculator ⏱️")
 st.markdown("""
 Estimate how long to run your A/B test based on your expected traffic and desired minimum detectable effect (MDE).
 This calculator helps you plan realistic timelines for your experiments.

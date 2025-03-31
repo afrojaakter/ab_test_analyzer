@@ -32,6 +32,7 @@ def generate_time_series_simulation(control_rate, variant_rate, visitors_per_day
     np.random.seed(random_seed)
     
     # Initialize data structures
+    # Using simple integers for days to avoid timestamp issues
     cumulative_data = {
         'day': list(range(1, days + 1)),
         'control_visitors': [],
